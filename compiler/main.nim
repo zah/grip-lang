@@ -14,7 +14,7 @@ import
   llstream, strutils, ast, astalgo, lexer, syntaxes, renderer, options, msgs, 
   os, lists, condsyms, rodread, rodwrite, ropes, trees, 
   wordrecg, sem, semdata, idents, passes, docgen, extccomp,
-  cgen, ecmasgen,
+  cgen, ecmasgen, indexgen,
   platform, nimconf, importer, passaux, depends, transf, evals, types
 
 const
@@ -107,6 +107,12 @@ proc CommandGenDepend(filename: string) =
   generateDot(filename)
   execExternalProgram("dot -Tpng -o" & changeFileExt(filename, "png") & ' ' &
       changeFileExt(filename, "dot"))
+
+proc CommandCTags(filename: string) =
+  semanticPasses()
+  registerPass(ctagsPass())
+  compileProject(filename)
+  writeCtags()
 
 proc CommandCheck(filename: string) = 
   msgs.gErrorMax = high(int)  # do not stop after first error
@@ -249,6 +255,10 @@ proc MainCommand(cmd, filename: string) =
     LoadSpecialConfig(DocTexConfig)
     wantFile(filename)
     CommandRst2TeX(filename)
+  of "ctags":
+    gCmd = cmdCtags
+    wantFile(filename)
+    CommandCTags(filename)
   of "gendepend": 
     gCmd = cmdGenDepend
     wantFile(filename)

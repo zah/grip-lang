@@ -53,7 +53,8 @@ type                          # please make sure we have under 32 options
   TCommands* = enum           # Nimrod's commands
     cmdNone, cmdCompileToC, cmdCompileToCpp, cmdCompileToOC, 
     cmdCompileToEcmaScript, cmdCompileToLLVM, cmdInterpret, cmdPretty, cmdDoc, 
-    cmdGenDepend, cmdDump, 
+    cmdCTags,
+    cmdGenDepend, cmdDump,
     cmdCheck,                 # semantic checking for whole project
     cmdParse,                 # parse a single file (for debugging)
     cmdScan,                  # scan a single file (for debugging)

@@ -438,7 +438,7 @@ proc processSwitch(switch, arg: string, pass: TCmdlinePass, info: TLineInfo) =
 proc ProcessCommand(switch: string, pass: TCmdLinePass) = 
   var
     cmd, arg: string
-    info: TLineInfo
-  info = newLineInfo("command line", 1, 1)
+    info = newLineInfo("command line", 1, 1)
+
   splitSwitch(switch, cmd, arg, pass, info)
   ProcessSwitch(cmd, arg, pass, info)

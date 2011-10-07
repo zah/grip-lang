@@ -128,6 +128,12 @@ proc del*(father: PNimrodNode, idx = 0, n = 1) {.magic: "NDel".}
 proc kind*(n: PNimrodNode): TNimrodNodeKind {.magic: "NKind".}
   ## returns the `kind` of the node `n`.
 
+iterator args*(macroStmt: PNimrodNode): PNimrodNode =
+  ## iterates over the macros arguments, 
+  ## when supplied the original macro statement
+  for i in countup(1, macroStmt.len - 1):
+    yield macroStmt[i]
+
 proc intVal*(n: PNimrodNode): biggestInt {.magic: "NIntVal".}
 proc floatVal*(n: PNimrodNode): biggestFloat {.magic: "NFloatVal".}
 proc symbol*(n: PNimrodNode): PNimrodSymbol {.magic: "NSymbol".}
