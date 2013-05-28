@@ -166,15 +166,9 @@ proc writeMatches*(c: TCandidate) =
   Writeln(stdout, "intconv matches: " & $c.intConvMatches)
   Writeln(stdout, "generic matches: " & $c.genericMatches)
 
-proc NotFoundError*(c: PContext, n: PNode) =
-  # Gives a detailed error message; this is separated from semOverloadedCall,
-  # as semOverlodedCall is already pretty slow (and we need this information
-  # only in case of an error).
-  if c.InCompilesContext > 0: 
-    # fail fast:
-    GlobalError(n.info, errTypeMismatch, "")
-  var result = msgKindToString(errTypeMismatch)
-  for i in countup(1, sonsLen(n) - 1):
+proc describeArgs*(c: PContext, n: PNode, startIdx = 1): string =
+  result = ""
+  for i in countup(startIdx, n.len - 1):
     var nt = n.sons[i].typ
     if n.sons[i].kind == nkExprEqExpr: 
       add(result, renderTree(n.sons[i].sons[0]))
@@ -190,6 +184,16 @@ proc NotFoundError*(c: PContext, n: PNode) =
     if nt.kind == tyError: return
     add(result, typeToString(nt))
     if i != sonsLen(n) - 1: add(result, ", ")
+
+proc NotFoundError*(c: PContext, n: PNode) =
+  # Gives a detailed error message; this is separated from semOverloadedCall,
+  # as semOverlodedCall is already pretty slow (and we need this information
+  # only in case of an error).
+  if c.InCompilesContext > 0: 
+    # fail fast:
+    GlobalError(n.info, errTypeMismatch, "")
+  var result = msgKindToString(errTypeMismatch)
+  add(result, describeArgs(c, n))
   add(result, ')')
   var candidates = ""
   var o: TOverloadIter
