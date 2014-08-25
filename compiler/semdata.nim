@@ -59,6 +59,7 @@ type
    
     ambiguousSymbols*: TIntSet # ids of all ambiguous symbols (cannot
                                # store this info in the syms themselves!)
+    inGripContext*: bool       # compling grip file
     inTypeClass*: int          # > 0 if we are in a user-defined type class
     inGenericContext*: int     # > 0 if we are in a generic type
     inUnrolledContext*: int    # > 0 if we are unrolling a loop

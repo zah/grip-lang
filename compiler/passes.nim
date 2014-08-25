@@ -159,17 +159,32 @@ proc processImplicits(implicits: seq[string], nodeKind: TNodeKind,
     str.info = gCmdLineInfo
     importStmt.addSon str
     if not processTopLevelStmt(importStmt, a): break
-  
+
+type
+  TGripProc = proc (module: PSym, filename: string, stream: PLLStream)
+
+var grip*: TGripProc
+
 proc processModule(module: PSym, stream: PLLStream, rd: PRodReader) =
   var 
     p: TParsers
     a: TPassContextArray
     s: PLLStream
     fileIdx = module.fileIdx
+    filename = fileIdx.toFullPath
+  
+  if filename.endsWith(".g"):
+    if stream == nil:
+      s = llStreamOpen(filename, fmRead)
+      if s == nil:
+        rawMessage(errCannotOpenFile, filename)
+        return
+    grip(module, filename, s)
+    return
+
   if rd == nil: 
     openPasses(a, module)
     if stream == nil: 
-      let filename = fileIdx.toFullPath
       s = llStreamOpen(filename, fmRead)
       if s == nil: 
         rawMessage(errCannotOpenFile, filename)

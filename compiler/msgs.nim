@@ -13,9 +13,13 @@ import
 when useCaas:
   import sockets
 
+
 type 
   TMsgKind* = enum 
-    errUnknown, errIllFormedAstX, errInternal, errCannotOpenFile, errGenerated, 
+    errUnknown,
+    errIllFormedAstX, errInternal, errCannotOpenFile, errGenerated, 
+    errClosingXExpected, errUnexpectedCharacter,
+    errInvalidOperator, errXCantBeUsedAsPostfix, errXCantBeUsedAsPrefix,
     errXCompilerDoesNotSupportCpp, errStringLiteralExpected, 
     errIntLiteralExpected, errInvalidCharacterConstant, 
     errClosingTripleQuoteExpected, errClosingQuoteExpected, 
@@ -134,6 +138,11 @@ const
     errInternal: "internal error: $1", 
     errCannotOpenFile: "cannot open \'$1\'", 
     errGenerated: "$1", 
+    errClosingXExpected: "closing $1 expected, but end of file reached",
+    errUnexpectedCharacter: "unexpected character: $1",
+    errInvalidOperator: "invalid operator: $1",
+    errXCantBeUsedAsPostfix: "$1 can't be used as postfix operator",
+    errXCantBeUsedAsPrefix: "$1 can't be used as prefix operator",
     errXCompilerDoesNotSupportCpp: "\'$1\' compiler does not support C++", 
     errStringLiteralExpected: "string literal expected", 
     errIntLiteralExpected: "integer literal expected", 
@@ -471,6 +480,8 @@ type
   ERecoverableError* = object of EInvalidValue
   ESuggestDone* = object of E_Base
 
+  TPos* = tuple[line, col: int16]
+
 const
   InvalidFileIDX* = int32(-1)
 
@@ -504,6 +515,9 @@ proc makeCString*(s: string): PRope =
   add(res, '\"')
   app(result, toRope(res))
 
+proc newPos*(line, col: int16): TPos =
+  result.line = line
+  result.col = col
 
 proc newFileInfo(fullPath, projPath: string): TFileInfo =
   result.fullPath = fullPath
@@ -551,6 +565,11 @@ var gCmdLineInfo* = newLineInfo(int32(0), 1, 1)
 
 fileInfos.add(newFileInfo("", "compilation artifact"))
 var gCodegenLineInfo* = newLineInfo(int32(1), 1, 1)
+
+proc `<`*(lhs, rhs: TLineInfo): bool =
+  if lhs.line < rhs.line: return true
+  if lhs.line > rhs.line: return false
+  return lhs.col < rhs.col
 
 proc raiseRecoverableError*(msg: string) {.noinline, noreturn.} =
   raise newException(ERecoverableError, msg)

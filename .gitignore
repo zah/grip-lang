@@ -11,6 +11,13 @@ nimcache/
 *.zip
 *.iss
 
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.dll
+.tup/
+
 mapping.txt
 tags
 install.sh

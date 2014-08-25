@@ -16,7 +16,7 @@ include "system/inclrtl"
 
 type
   TNimrodNodeKind* = enum
-    nnkNone, nnkEmpty, nnkIdent, nnkSym,
+    nnkNone, nnkSourceRange, nnkEmpty, nnkIdent, nnkSym,
     nnkType, nnkCharLit, nnkIntLit, nnkInt8Lit,
     nnkInt16Lit, nnkInt32Lit, nnkInt64Lit, nnkUIntLit, nnkUInt8Lit,
     nnkUInt16Lit, nnkUInt32Lit, nnkUInt64Lit, nnkFloatLit,

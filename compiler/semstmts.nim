@@ -328,6 +328,21 @@ proc checkNilable(v: PSym) =
     elif tfNotNil in v.typ.flags and tfNotNil notin v.ast.typ.flags:
       message(v.info, warnProveInit, v.name.s)
 
+proc addVarDecl(c: PContext, n: PNode, v: PSym) =
+  var prev = strTableGet(c.currentScope.symbols, v.name)
+  if prev != nil:
+    if prev.kind notin { skConst, skVar, skLet }:
+      localError(v.info, errAttemptToRedefine, v.name.s)
+    else:
+      internalAssert prev.typ != nil and v.typ != nil
+      if not sameType(prev.typ, v.typ):
+        typeMismatch(n, prev.typ, v.typ)
+      else:
+        v.next = prev
+        symTabReplace(c.currentScope.symbols, prev, v)
+  else:
+    if sfGenSym notin v.flags: addInterfaceDecl(c, v)
+
 proc semVarOrLet(c: PContext, n: PNode, symkind: TSymKind): PNode = 
   var b: PNode
   result = copyNode(n)
@@ -381,7 +396,6 @@ proc semVarOrLet(c: PContext, n: PNode, symkind: TSymKind): PNode =
       message(a.info, warnEachIdentIsTuple)
     for j in countup(0, length-3):
       var v = semIdentDef(c, a.sons[j], symkind)
-      if sfGenSym notin v.flags: addInterfaceDecl(c, v)
       when oKeepVariableNames:
         if c.inUnrolledContext > 0: v.flags.incl(sfShadowed)
         else:
@@ -410,6 +424,7 @@ proc semVarOrLet(c: PContext, n: PNode, symkind: TSymKind): PNode =
         if def.kind == nkPar: v.ast = def[j]
         v.typ = tup.sons[j]
         b.sons[j] = newSymNode(v)
+      addVarDecl(c, n, v)
       checkNilable(v)
       if sfCompileTime in v.flags: hasCompileTime = true
   if hasCompileTime: vm.setupCompileTimeVar(c.module, result)
@@ -443,7 +458,7 @@ proc semConst(c: PContext, n: PNode): PNode =
       continue
     v.typ = typ
     v.ast = def               # no need to copy
-    if sfGenSym notin v.flags: addInterfaceDecl(c, v)
+    addVarDecl(c, n, v)
     var b = newNodeI(nkConstDef, a.info)
     if importantComments(): b.comment = a.comment
     addSon(b, newSymNode(v))

@@ -439,3 +439,4 @@ proc myClose(context: PPassContext, n: PNode): PNode =
 
 const semPass* = makePass(myOpen, myOpenCached, myProcess, myClose)
 
+include semgrip

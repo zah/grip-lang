@@ -38,7 +38,8 @@ type
     wMagic, wThread, wFinal, wProfiler, wObjChecks,
 
     wDestroy,
-    
+    wDef, wFn,
+
     wImmediate, wDestructor, wDelegator, wOverride,
     wImportCpp, wImportObjC,
     wImportCompilerProc,
@@ -121,7 +122,8 @@ const
     "magic", "thread", "final", "profiler", "objchecks",
 
     "destroy",
-    
+    "def", "fn",
+
     "immediate", "destructor", "delegator", "override",
     "importcpp", "importobjc",
     "importcompilerproc", "importc", "exportc", "incompletestruct",

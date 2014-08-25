@@ -412,6 +412,8 @@ proc debugTree(n: PNode, indent: int, maxRecDepth: int;
       case n.kind
       of nkCharLit..nkUInt64Lit:
         appf(result, ",$N$1\"intVal\": $2", [istr, toRope(n.intVal)])
+      of nkSourceRange:
+        appf(result, ",$N$1: $2", [istr, toRope(" ")])
       of nkFloatLit, nkFloat32Lit, nkFloat64Lit: 
         appf(result, ",$N$1\"floatVal\": $2", 
             [istr, toRope(n.floatVal.toStrMaxPrecision)])

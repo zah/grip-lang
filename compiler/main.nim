@@ -20,6 +20,8 @@ import
 
 from magicsys import systemModule, resetSysTypes
 
+import grip
+
 const
   hasLLVM_Backend = false
 

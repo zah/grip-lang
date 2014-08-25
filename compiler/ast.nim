@@ -37,6 +37,7 @@ type
     nkNone,               # unknown node kind: indicates an error
                           # Expressions:
                           # Atoms:
+    nkSourceRange,        # a range of the program source yet to be parsed
     nkEmpty,              # the node is empty
     nkIdent,              # node is an identifier
     nkSym,                # node is a symbol
@@ -623,6 +624,8 @@ type
     case kind*: TNodeKind
     of nkCharLit..nkUInt64Lit:
       intVal*: BiggestInt
+    of nkSourceRange:
+      ends*: TPos # the beggining is indicated by the info field
     of nkFloatLit..nkFloat128Lit:
       floatVal*: BiggestFloat
     of nkStrLit..nkTripleStrLit:
@@ -738,6 +741,7 @@ type
     name*: PIdent
     info*: TLineInfo
     owner*: PSym
+    next*: PSym
     flags*: TSymFlags
     ast*: PNode               # syntax tree of proc, iterator, etc.:
                               # the whole proc including header; this is used

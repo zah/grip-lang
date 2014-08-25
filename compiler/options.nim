@@ -341,6 +341,8 @@ proc findModule*(modulename, currentModule: string): string =
   if not existsFile(result):
     result = findFile(m)
 
+  if len(result) == 0: result = findFile(addFileExt(modulename, ".g"))
+
 proc libCandidates*(s: string, dest: var seq[string]) = 
   var le = strutils.find(s, '(')
   var ri = strutils.find(s, ')', le+1)
