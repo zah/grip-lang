@@ -1,6 +1,6 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2014 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -14,7 +14,7 @@ import
 
 # We need to use a PStringTable here as defined symbols are always guaranteed
 # to be style insensitive. Otherwise hell would break lose.
-var gSymbols: PStringTable
+var gSymbols: StringTableRef
 
 proc defineSymbol*(symbol: string) = 
   gSymbols[symbol] = "true"
@@ -60,7 +60,7 @@ const
     quick
     release debug
     useWinAnsi useFork useNimRtl useMalloc useRealtimeGC ssl memProfiler
-    nodejs kwin
+    nodejs kwin nimfix
 
     usesysassert usegcassert tinyC useFFI
     useStdoutAsStdmsg createNimRtl
@@ -85,6 +85,7 @@ proc initDefines*() =
   defineSymbol("nimnewshared")
   defineSymbol("nimrequiresnimframe")
   defineSymbol("nimparsebiggestfloatmagic")
+  defineSymbol("nimalias")
   
   # add platform specific symbols:
   for c in low(CPU)..high(CPU):

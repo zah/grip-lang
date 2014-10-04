@@ -14,8 +14,12 @@ News
     ``threadpool``.
   - The symbol binding rules in generics changed: ``bar`` in ``foo.bar`` is
     now considered for implicit early binding.
-  - ``c2nim`` moved into its own repository and is now a Babel package.
-  - ``pas2nim`` moved into its own repository and is now a Babel package.
+  - ``c2nim`` moved into its own
+    `repository <https://github.com/nimrod-code/c2nim>`_
+    and is now a Nimble package.
+  - ``pas2nim`` moved into its own
+    `repository <https://github.com/nimrod-code/pas2nim>`_
+    and is now a Nimble package.
   - ``system.$`` for floating point types now produces a human friendly string
     representation.
   - ``uri.TUrl`` as well as the ``parseurl`` module are now deprecated in favour
@@ -29,13 +33,49 @@ News
   - ``--threadanalysis:on`` is now the default. To make your program compile
     you can disable it but this is only a temporary solution as this option
     will disappear soon!
-  
+  - ``system.fileHandle`` has been renamed to ``system.getFileHandle`` to
+    prevent name conflicts with the new type ``FileHandle``.
+  - Comments are now not part of the AST, as such you cannot use them in place
+    of ``discard``.
+  - The ``irc`` module has been moved into its own
+    `repository <https://github.com/nimrod-code/irc>`_
+    and is now a Nimble package.
+  - Many wrappers have been moved into their own repositories and are now
+    Nimble packages including ``lua``, ``opengl``, ``x11``, ``nim-zmq``,
+    ``gtk2``, ``mongo``, ``cairo``, ``tcl``, ``python`` and 
+    `more <https://github.com/Araq/Nimrod/issues/623>`_. They can be
+    found under the `nim-code <https://github.com/nimrod-code>`_ organisation.
+  - Removed the deprecated ``web`` module, the ``httpclient`` module should
+    be used instead.
+  - String case (or any non-ordinal case) statements 
+    without 'else' are deprecated.
+  - Recursive tuple types are not allowed anymore. Use ``object`` instead.
+
+
+  Compiler Additions
+  ------------------
+
+  - The compiler now supports *mixed* Objective C / C++ / C code generation:
+    The modules that use ``importCpp`` or ``importObjc`` are compiled to C++
+    or Objective C code, any other module is compiled to C code. This
+    improves interoperability.
+
 
   Language Additions
   ------------------
 
   - There is a new ``parallel`` statement for safe fork&join parallel computing.
-  
+  - ``guard`` and ``lock`` pragmas have been implemented to support safer
+    concurrent programming.
+  - The following procs are now available at compile-time::
+
+      math.sqrt, math.ln, math.log10, math.log2, math.exp, math.round,
+      math.arccos, math.arcsin, math.arctan, math.arctan2, math.cos, math.cosh,
+      math.hypot, math.sinh, math.sin, math.tan, math.tanh, math.pow,
+      math.trunc, math.floor, math.ceil, math.fmod,
+      os.getEnv, os.existsEnv, os.dirExists, os.fileExists,
+      system.writeFile
+
 
   Library Additions
   -----------------
@@ -87,7 +127,7 @@ the use of an ``await`` macro which behaves similar to C#'s await. The
 following is a very simple chat server demonstrating Nimrod's new async
 capabilities.
 
-.. code-block::nimrod
+.. code-block::nim
   import asyncnet, asyncdispatch
 
   var clients: seq[PAsyncSocket] = @[]
@@ -120,7 +160,7 @@ Syntactic sugar for anonymous procedures has also been introduced. It too has
 been implemented as a macro. The following shows some simple usage of the new
 syntax:
  
-.. code-block::nimrod
+.. code-block::nim
   import future
   
   var s = @[1, 2, 3, 4, 5]

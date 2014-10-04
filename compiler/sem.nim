@@ -1,6 +1,6 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2013 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -17,6 +17,9 @@ import
   intsets, transf, vmdef, vm, idgen, aliases, cgmeth, lambdalifting,
   evaltempl, patterns, parampatterns, sempass2, pretty, semmacrosanity,
   semparallel, lowerings
+
+when defined(nimfix):
+  import prettybase
 
 # implementation
 
@@ -308,6 +311,7 @@ proc semMacroExpr(c: PContext, n, nOrig: PNode, sym: PSym,
   pushInfoContext(nOrig.info)
 
   markUsed(n.info, sym)
+  styleCheckUse(n.info, sym)
   if sym == c.p.owner:
     globalError(n.info, errRecursiveDependencyX, sym.name.s)
 
@@ -340,7 +344,7 @@ type
   TSemGenericFlags = set[TSemGenericFlag]
 
 proc semGenericStmt(c: PContext, n: PNode, flags: TSemGenericFlags,
-                    ctx: var TIntSet): PNode
+                    ctx: var IntSet): PNode
 
 include semtypes, semtempl, semgnrc, semstmts, semexprs
 
@@ -367,6 +371,8 @@ proc myOpen(module: PSym): PPassContext =
   c.semInferredLambda = semInferredLambda
   c.semGenerateInstance = generateInstance
   c.semTypeNode = semTypeNode
+  c.instDeepCopy = sigmatch.instDeepCopy
+
   pushProcCon(c, module)
   pushOwner(c.module)
   c.importTable = openScope(c)

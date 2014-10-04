@@ -1,6 +1,6 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2013 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -22,21 +22,25 @@ proc semDiscard(c: PContext, n: PNode): PNode =
 proc semBreakOrContinue(c: PContext, n: PNode): PNode =
   result = n
   checkSonsLen(n, 1)
-  if n.sons[0].kind != nkEmpty: 
-    var s: PSym
-    case n.sons[0].kind
-    of nkIdent: s = lookUp(c, n.sons[0])
-    of nkSym: s = n.sons[0].sym
-    else: illFormedAst(n)
-    if s.kind == skLabel and s.owner.id == c.p.owner.id: 
-      var x = newSymNode(s)
-      x.info = n.info
-      incl(s.flags, sfUsed)
-      n.sons[0] = x
-      suggestSym(x.info, s)
+  if n.sons[0].kind != nkEmpty:
+    if n.kind != nkContinueStmt:
+      var s: PSym
+      case n.sons[0].kind
+      of nkIdent: s = lookUp(c, n.sons[0])
+      of nkSym: s = n.sons[0].sym
+      else: illFormedAst(n)
+      if s.kind == skLabel and s.owner.id == c.p.owner.id: 
+        var x = newSymNode(s)
+        x.info = n.info
+        incl(s.flags, sfUsed)
+        n.sons[0] = x
+        suggestSym(x.info, s)
+        styleCheckUse(x.info, s)
+      else:
+        localError(n.info, errInvalidControlFlowX, s.name.s)
     else:
-      localError(n.info, errInvalidControlFlowX, s.name.s)
-  elif (c.p.nestedLoopCounter <= 0) and (c.p.nestedBlockCounter <= 0): 
+      localError(n.info, errGenerated, "'continue' cannot have a label")
+  elif (c.p.nestedLoopCounter <= 0) and (c.p.nestedBlockCounter <= 0):
     localError(n.info, errInvalidControlFlowX, 
                renderTree(n, {renderNoComments}))
 
@@ -195,11 +199,12 @@ proc semCase(c: PContext, n: PNode): PNode =
   var covered: BiggestInt = 0
   var typ = commonTypeBegin
   var hasElse = false
+  var notOrdinal = false
   case skipTypes(n.sons[0].typ, abstractVarRange-{tyTypeDesc}).kind
   of tyInt..tyInt64, tyChar, tyEnum, tyUInt..tyUInt32, tyBool:
     chckCovered = true
   of tyFloat..tyFloat128, tyString, tyError:
-    discard
+    notOrdinal = true
   else:
     localError(n.info, errSelectorMustBeOfCertainTypes)
     return
@@ -229,6 +234,9 @@ proc semCase(c: PContext, n: PNode): PNode =
       hasElse = true
     else:
       illFormedAst(x)
+  if notOrdinal and not hasElse:
+    message(n.info, warnDeprecated,
+            "use 'else: discard'; non-ordinal case without 'else'")
   if chckCovered:
     if covered == toCover(n.sons[0].typ):
       hasElse = true
@@ -320,6 +328,7 @@ proc semIdentDef(c: PContext, n: PNode, kind: TSymKind): PSym =
   else:
     result = semIdentWithPragma(c, kind, n, {})
   suggestSym(n.info, result)
+  styleCheckDef(result)
 
 proc checkNilable(v: PSym) =
   if sfGlobal in v.flags and {tfNotNil, tfNeedsInit} * v.typ.flags != {}:
@@ -362,9 +371,14 @@ proc semVarOrLet(c: PContext, n: PNode, symkind: TSymKind): PNode =
     var def: PNode
     if a.sons[length-1].kind != nkEmpty:
       def = semExprWithType(c, a.sons[length-1], {efAllowDestructor})
-      # BUGFIX: ``fitNode`` is needed here!
-      # check type compability between def.typ and typ:
-      if typ != nil: def = fitNode(c, typ, def)
+      if typ != nil:
+        if typ.isMetaType:
+          def = inferWithMetatype(c, typ, def)
+          typ = def.typ
+        else:
+          # BUGFIX: ``fitNode`` is needed here!
+          # check type compability between def.typ and typ        
+          def = fitNode(c, typ, def)
       else:
         typ = skipIntLit(def.typ)
         if typ.kind in {tySequence, tyArray, tySet} and
@@ -453,7 +467,7 @@ proc semConst(c: PContext, n: PNode): PNode =
     if typ == nil:
       localError(a.sons[2].info, errConstExprExpected)
       continue
-    if not typeAllowed(typ, skConst):
+    if not typeAllowed(typ, skConst) and def.kind != nkNilLit:
       localError(a.info, errXisNoType, typeToString(typ))
       continue
     v.typ = typ
@@ -626,6 +640,7 @@ proc addForVarDecl(c: PContext, v: PSym) =
 proc symForVar(c: PContext, n: PNode): PSym =
   let m = if n.kind == nkPragmaExpr: n.sons[0] else: n
   result = newSymG(skForVar, m, c)
+  styleCheckDef(result)
 
 proc semForVars(c: PContext, n: PNode): PNode =
   result = n
@@ -1033,7 +1048,11 @@ proc semOverride(c: PContext, s: PSym, n: PNode) =
         sameType(s.typ.sons[1], s.typ.sons[0]):
       # Note: we store the deepCopy in the base of the pointer to mitigate
       # the problem that pointers are structural types:
-      let t = s.typ.sons[1].skipTypes(abstractInst).lastSon.skipTypes(abstractInst)
+      var t = s.typ.sons[1].skipTypes(abstractInst).lastSon.skipTypes(abstractInst)
+      while true:
+        if t.kind == tyGenericBody: t = t.lastSon
+        elif t.kind == tyGenericInvokation: t = t.sons[0]
+        else: break
       if t.kind in {tyObject, tyDistinct, tyEnum}:
         if t.deepCopy.isNil: t.deepCopy = s
         else: 
@@ -1048,6 +1067,7 @@ proc semOverride(c: PContext, s: PSym, n: PNode) =
   of "=": discard
   else: localError(n.info, errGenerated,
                    "'destroy' or 'deepCopy' expected for 'override'")
+  incl(s.flags, sfUsed)
 
 type
   TProcCompilationSteps = enum
@@ -1304,9 +1324,14 @@ proc semPragmaBlock(c: PContext, n: PNode): PNode =
   let pragmaList = n.sons[0]
   pragma(c, nil, pragmaList, exprPragmas)
   result = semExpr(c, n.sons[1])
+  n.sons[1] = result
   for i in 0 .. <pragmaList.len:
-    if whichPragma(pragmaList.sons[i]) == wLine:
-      setLine(result, pragmaList.sons[i].info)
+    case whichPragma(pragmaList.sons[i])
+    of wLine: setLine(result, pragmaList.sons[i].info)
+    of wLocks: 
+      result = n
+      result.typ = n.sons[1].typ
+    else: discard
 
 proc semStaticStmt(c: PContext, n: PNode): PNode =
   let a = semStmt(c, n.sons[0])
@@ -1405,6 +1430,11 @@ proc semStmtList(c: PContext, n: PNode, flags: TExprFlags): PNode =
       else: discard
   if result.len == 1:
     result = result.sons[0]
+  when defined(nimfix):
+    if result.kind == nkCommentStmt and not result.comment.isNil and
+        not (result.comment[0] == '#' and result.comment[1] == '#'):
+      # it is an old-style comment statement: we replace it with 'discard ""':
+      prettybase.replaceComment(result.info)
   when false:
     # a statement list (s; e) has the type 'e':
     if result.kind == nkStmtList and result.len > 0:

@@ -1,6 +1,6 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2014 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -216,12 +216,16 @@ proc replaceTypeVarsS(cl: var TReplTypeVars, s: PSym): PSym =
     result.typ = replaceTypeVarsT(cl, s.typ)
     result.ast = replaceTypeVarsN(cl, s.ast)
     
-proc lookupTypeVar(cl: TReplTypeVars, t: PType): PType = 
+proc lookupTypeVar(cl: var TReplTypeVars, t: PType): PType =
   result = PType(idTableGet(cl.typeMap, t))
   if result == nil:
     if cl.allowMetaTypes or tfRetType in t.flags: return
     localError(t.sym.info, errCannotInstantiateX, typeToString(t))
     result = errorType(cl.c)
+    # In order to prevent endless recursions, we must remember
+    # this bad lookup and replace it with errorType everywhere.
+    # These code paths are only active in nimrod check
+    idTablePut(cl.typeMap, t, result)
   elif result.kind == tyGenericParam and not cl.allowMetaTypes:
     internalError(cl.info, "substitution with generic parameter")
 
@@ -295,6 +299,11 @@ proc handleGenericInvokation(cl: var TReplTypeVars, t: PType): PType =
   if newbody.isGenericAlias: newbody = newbody.skipGenericAlias
   rawAddSon(result, newbody)
   checkPartialConstructedType(cl.info, newbody)
+  let dc = newbody.deepCopy
+  if dc != nil and sfFromGeneric notin newbody.deepCopy.flags:
+    # 'deepCopy' needs to be instantiated for
+    # generics *when the type is constructed*:
+    newbody.deepCopy = cl.c.instDeepCopy(cl.c, dc, result, cl.info)
 
 proc eraseVoidParams*(t: PType) =
   if t.sons[0] != nil and t.sons[0].kind == tyEmpty:
@@ -353,7 +362,7 @@ proc replaceTypeVarsTAux(cl: var TReplTypeVars, t: PType): PType =
 
   of tyGenericBody:
     localError(cl.info, errCannotInstantiateX, typeToString(t))
-    result = t
+    result = errorType(cl.c)
     #result = replaceTypeVarsT(cl, lastSon(t))
 
   of tyFromExpr:

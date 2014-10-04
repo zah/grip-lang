@@ -1,6 +1,6 @@
 #
 #
-#            Nimrod's Runtime Library
+#            Nim's Runtime Library
 #        (c) Copyright 2014 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -11,7 +11,7 @@
 # use the heap (and nor exceptions) do not include the GC or memory allocator.
 
 var
-  errorMessageWriter*: (proc(msg: string) {.tags: [FWriteIO], gcsafe.})
+  errorMessageWriter*: (proc(msg: string) {.tags: [WriteIOEffect], gcsafe.})
     ## Function that will be called
     ## instead of stdmsg.write when printing stacktrace.
     ## Unstable API.
@@ -42,7 +42,7 @@ var
   excHandler {.threadvar.}: PSafePoint
     # list of exception handlers
     # a global variable for the root of all try blocks
-  currException {.threadvar.}: ref E_Base
+  currException {.threadvar.}: ref Exception
 
 proc popFrame {.compilerRtl, inl.} =
   framePtr = framePtr.prev
@@ -58,7 +58,7 @@ proc pushSafePoint(s: PSafePoint) {.compilerRtl, inl.} =
 proc popSafePoint {.compilerRtl, inl.} =
   excHandler = excHandler.prev
 
-proc pushCurrentException(e: ref E_Base) {.compilerRtl, inl.} = 
+proc pushCurrentException(e: ref Exception) {.compilerRtl, inl.} = 
   e.parent = currException
   currException = e
 
@@ -68,8 +68,8 @@ proc popCurrentException {.compilerRtl, inl.} =
 # some platforms have native support for stack traces:
 const
   nativeStackTraceSupported* = (defined(macosx) or defined(linux)) and
-                              not nimrodStackTrace
-  hasSomeStackTrace = nimrodStackTrace or 
+                              not NimStackTrace
+  hasSomeStackTrace = NimStackTrace or 
     defined(nativeStackTrace) and nativeStackTraceSupported
 
 when defined(nativeStacktrace) and nativeStackTraceSupported:
@@ -177,7 +177,7 @@ proc auxWriteStackTrace(f: PFrame, s: var string) =
 
 when hasSomeStackTrace:
   proc rawWriteStackTrace(s: var string) =
-    when nimrodStackTrace:
+    when NimStackTrace:
       if framePtr == nil:
         add(s, "No stack traceback available\n")
       else:
@@ -195,7 +195,7 @@ proc quitOrDebug() {.inline.} =
   else:
     endbStep() # call the debugger
 
-proc raiseExceptionAux(e: ref E_Base) =
+proc raiseExceptionAux(e: ref Exception) =
   if localRaiseHook != nil:
     if not localRaiseHook(e): return
   if globalRaiseHook != nil:
@@ -204,7 +204,7 @@ proc raiseExceptionAux(e: ref E_Base) =
     if not excHandler.hasRaiseAction or excHandler.raiseAction(e):
       pushCurrentException(e)
       c_longjmp(excHandler.context, 1)
-  elif e[] of EOutOfMemory:
+  elif e[] of OutOfMemError:
     showErrorMessage(e.name)
     quitOrDebug()
   else:
@@ -236,7 +236,7 @@ proc raiseExceptionAux(e: ref E_Base) =
       showErrorMessage(buf)
     quitOrDebug()
 
-proc raiseException(e: ref E_Base, ename: cstring) {.compilerRtl.} =
+proc raiseException(e: ref Exception, ename: cstring) {.compilerRtl.} =
   e.name = ename
   when hasSomeStackTrace:
     e.trace = ""
@@ -245,7 +245,7 @@ proc raiseException(e: ref E_Base, ename: cstring) {.compilerRtl.} =
 
 proc reraiseException() {.compilerRtl.} =
   if currException == nil:
-    sysFatal(ENoExceptionToReraise, "no exception to reraise")
+    sysFatal(ReraiseError, "no exception to reraise")
   else:
     raiseExceptionAux(currException)
 
@@ -264,7 +264,7 @@ proc getStackTrace(): string =
   else:
     result = "No stack traceback available\n"
 
-proc getStackTrace(e: ref E_Base): string =
+proc getStackTrace(e: ref Exception): string =
   if not isNil(e) and not isNil(e.trace):
     result = e.trace
   else:
@@ -318,7 +318,7 @@ when not defined(noSignalHandler):
       GC_disable()
       var buf = newStringOfCap(2000)
       rawWriteStackTrace(buf)
-      processSignal(sig, buf.add) # nice hu? currying a la nimrod :-)
+      processSignal(sig, buf.add) # nice hu? currying a la Nim :-)
       showErrorMessage(buf)
       GC_enable()
     else:
@@ -326,7 +326,7 @@ when not defined(noSignalHandler):
       template asgn(y: expr) = msg = y
       processSignal(sig, asgn)
       showErrorMessage(msg)
-    when defined(endb): dbgAborting = True
+    when defined(endb): dbgAborting = true
     quit(1) # always quit when SIGABRT
 
   proc registerSignalHandler() =

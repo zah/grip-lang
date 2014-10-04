@@ -1,13 +1,13 @@
 #
 #
-#            Nimrod's Runtime Library
+#            Nim's Runtime Library
 #        (c) Copyright 2012 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
 #
 
-## This module contains Nimrod's support for locks and condition vars.
+## This module contains Nim's support for locks and condition vars.
 ## If the symbol ``preventDeadlocks`` is defined
 ## (compiled with ``-d:preventDeadlocks``) special logic is added to
 ## every ``acquire``, ``tryAcquire`` and ``release`` action that ensures at
@@ -18,17 +18,19 @@
 include "system/syslocks"
 
 type
-  TLock* = TSysLock ## Nimrod lock; whether this is re-entrant
+  TLock* = TSysLock ## Nim lock; whether this is re-entrant
                     ## or not is unspecified! However, compilation
                     ## in preventDeadlocks-mode guarantees re-entrancy.
-  TCond* = TSysCond ## Nimrod condition variable
+  TCond* = TSysCond ## Nim condition variable
   
-  FLock* = object of TEffect ## effect that denotes that some lock operation
-                             ## is performed
-  FAquireLock* = object of FLock  ## effect that denotes that some lock is
-                                  ## aquired
-  FReleaseLock* = object of FLock ## effect that denotes that some lock is
-                                  ## released
+  LockEffect* = object of RootEffect ## effect that denotes that some lock operation
+                                     ## is performed
+  AquireEffect* = object of LockEffect  ## effect that denotes that some lock is
+                                        ## aquired
+  ReleaseEffect* = object of LockEffect ## effect that denotes that some lock is
+                                        ## released
+{.deprecated: [FLock: LockEffect, FAquireLock: AquireEffect, 
+    FReleaseLock: ReleaseEffect].}
   
 const
   noDeadlocks = defined(preventDeadlocks)
@@ -58,7 +60,7 @@ proc deinitLock*(lock: var TLock) {.inline.} =
   ## Frees the resources associated with the lock.
   deinitSys(lock)
 
-proc tryAcquire*(lock: var TLock): bool {.tags: [FAquireLock].} = 
+proc tryAcquire*(lock: var TLock): bool {.tags: [AquireEffect].} = 
   ## Tries to acquire the given lock. Returns `true` on success.
   result = tryAcquireSys(lock)
   when noDeadlocks:
@@ -90,7 +92,7 @@ proc tryAcquire*(lock: var TLock): bool {.tags: [FAquireLock].} =
     inc(locksLen)
     assert orderedLocks()
 
-proc acquire*(lock: var TLock) {.tags: [FAquireLock].} =
+proc acquire*(lock: var TLock) {.tags: [AquireEffect].} =
   ## Acquires the given lock.
   when nodeadlocks:
     var p = addr(lock)
@@ -135,7 +137,7 @@ proc acquire*(lock: var TLock) {.tags: [FAquireLock].} =
   else:
     acquireSys(lock)
   
-proc release*(lock: var TLock) {.tags: [FReleaseLock].} =
+proc release*(lock: var TLock) {.tags: [ReleaseEffect].} =
   ## Releases the given lock.
   when nodeadlocks:
     var p = addr(lock)

@@ -1,6 +1,6 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2014 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -21,10 +21,10 @@ import
 
 const 
   MaxLineLength* = 80         # lines longer than this lead to a warning
-  numChars*: TCharSet = {'0'..'9', 'a'..'z', 'A'..'Z'}
-  SymChars*: TCharSet = {'a'..'z', 'A'..'Z', '0'..'9', '\x80'..'\xFF'}
-  SymStartChars*: TCharSet = {'a'..'z', 'A'..'Z', '\x80'..'\xFF'}
-  OpChars*: TCharSet = {'+', '-', '*', '/', '\\', '<', '>', '!', '?', '^', '.', 
+  numChars*: set[char] = {'0'..'9', 'a'..'z', 'A'..'Z'}
+  SymChars*: set[char] = {'a'..'z', 'A'..'Z', '0'..'9', '\x80'..'\xFF'}
+  SymStartChars*: set[char] = {'a'..'z', 'A'..'Z', '\x80'..'\xFF'}
+  OpChars*: set[char] = {'+', '-', '*', '/', '\\', '<', '>', '!', '?', '^', '.', 
     '|', '=', '%', '&', '$', '@', '~', ':', '\x80'..'\xFF'}
 
 # don't forget to update the 'highlite' module if these charsets should change
@@ -102,7 +102,7 @@ type
                               # so that it is the correct default value
     base2, base8, base16
 
-  TToken* = object            # a Nimrod token
+  TToken* = object            # a Nim token
     tokType*: TTokType        # the type of the token
     indent*: int              # the indentation; != -1 if the token has been
                               # preceeded with indentation
@@ -148,7 +148,7 @@ proc lexMessage*(L: TLexer, msg: TMsgKind, arg = "")
 proc isKeyword(kind: TTokType): bool = 
   result = (kind >= tokKeywordLow) and (kind <= tokKeywordHigh)
 
-proc isNimrodIdentifier*(s: string): bool =
+proc isNimIdentifier*(s: string): bool =
   if s[0] in SymStartChars:
     var i = 1
     while i < s.len:
@@ -229,7 +229,7 @@ proc lexMessagePos(L: var TLexer, msg: TMsgKind, pos: int, arg = "") =
   var info = newLineInfo(L.fileIdx, L.lineNumber, pos - L.lineStart)
   msgs.message(info, msg, arg)
 
-proc matchUnderscoreChars(L: var TLexer, tok: var TToken, chars: TCharSet) = 
+proc matchUnderscoreChars(L: var TLexer, tok: var TToken, chars: set[char]) = 
   var pos = L.bufpos              # use registers for pos, buf
   var buf = L.buf
   while true: 
@@ -246,7 +246,7 @@ proc matchUnderscoreChars(L: var TLexer, tok: var TToken, chars: TCharSet) =
       inc(pos)
   L.bufpos = pos
 
-proc matchTwoChars(L: TLexer, first: char, second: TCharSet): bool = 
+proc matchTwoChars(L: TLexer, first: char, second: set[char]): bool = 
   result = (L.buf[L.bufpos] == first) and (L.buf[L.bufpos + 1] in second)
 
 proc isFloatLiteral(s: string): bool =
@@ -429,9 +429,9 @@ proc getNumber(L: var TLexer): TToken =
       elif result.tokType == tkInt16Lit and
           (result.iNumber < int16.low or result.iNumber > int16.high):
         lexMessage(L, errNumberOutOfRange, result.literal)
-  except EInvalidValue:
+  except ValueError:
     lexMessage(L, errInvalidNumber, result.literal)
-  except EOverflow, EOutOfRange:
+  except OverflowError, RangeError:
     lexMessage(L, errNumberOutOfRange, result.literal)
   L.bufpos = endpos
 
@@ -482,7 +482,7 @@ proc getEscapedChar(L: var TLexer, tok: var TToken) =
     add(tok.literal, VT)
     inc(L.bufpos)
   of 't', 'T': 
-    add(tok.literal, Tabulator)
+    add(tok.literal, '\t')
     inc(L.bufpos)
   of '\'', '\"': 
     add(tok.literal, L.buf[L.bufpos])
@@ -519,7 +519,7 @@ proc handleCRLF(L: var TLexer, pos: int): int =
       lexMessagePos(L, hintLineTooLong, pos)
 
     if optEmbedOrigSrc in gGlobalOptions:
-      let lineStart = cast[TAddress](L.buf) + L.lineStart
+      let lineStart = cast[ByteAddress](L.buf) + L.lineStart
       let line = newString(cast[cstring](lineStart), col)
       addSourceLine(L.fileIdx, line)
   
@@ -659,28 +659,32 @@ proc getOperator(L: var TLexer, tok: var TToken) =
   if buf[pos] in {CR, LF, nimlexbase.EndOfFile}:
     tok.strongSpaceB = -1
 
-proc scanComment(L: var TLexer, tok: var TToken) = 
+proc scanComment(L: var TLexer, tok: var TToken) =
   var pos = L.bufpos
-  var buf = L.buf 
-  # a comment ends if the next line does not start with the # on the same
-  # column after only whitespace
+  var buf = L.buf
+  when not defined(nimfix):
+    assert buf[pos+1] == '#'
+    if buf[pos+2] == '[':
+      lexMessagePos(L, warnDeprecated, pos, "use '## [' instead; '##['")
   tok.tokType = tkComment
   # iNumber contains the number of '\n' in the token
   tok.iNumber = 0
-  var col = getColNumber(L, pos)
+  when defined(nimfix):
+    var col = getColNumber(L, pos)
   while true:
     var lastBackslash = -1
     while buf[pos] notin {CR, LF, nimlexbase.EndOfFile}:
       if buf[pos] == '\\': lastBackslash = pos+1
       add(tok.literal, buf[pos])
       inc(pos)
-    if lastBackslash > 0:
-      # a backslash is a continuation character if only followed by spaces
-      # plus a newline:
-      while buf[lastBackslash] == ' ': inc(lastBackslash)
-      if buf[lastBackslash] notin {CR, LF, nimlexbase.EndOfFile}:
-        # false positive:
-        lastBackslash = -1
+    when defined(nimfix):
+      if lastBackslash > 0:
+        # a backslash is a continuation character if only followed by spaces
+        # plus a newline:
+        while buf[lastBackslash] == ' ': inc(lastBackslash)
+        if buf[lastBackslash] notin {CR, LF, nimlexbase.EndOfFile}:
+          # false positive:
+          lastBackslash = -1
 
     pos = handleCRLF(L, pos)
     buf = L.buf
@@ -688,9 +692,16 @@ proc scanComment(L: var TLexer, tok: var TToken) =
     while buf[pos] == ' ': 
       inc(pos)
       inc(indent)
-    if buf[pos] == '#' and (col == indent or lastBackslash > 0):
+
+    when defined(nimfix):
+      template doContinue(): expr =
+        buf[pos] == '#' and (col == indent or lastBackslash > 0)
+    else:
+      template doContinue(): expr =
+        buf[pos] == '#' and buf[pos+1] == '#'
+    if doContinue():
       tok.literal.add "\n"
-      col = indent
+      when defined(nimfix): col = indent
       inc tok.iNumber
     else:
       if buf[pos] > ' ': 
@@ -707,7 +718,7 @@ proc skip(L: var TLexer, tok: var TToken) =
     of ' ':
       inc(pos)
       inc(tok.strongSpaceA)
-    of Tabulator:
+    of '\t':
       lexMessagePos(L, errTabulatorsAreNotAllowed, pos)
       inc(pos)
     of CR, LF:
@@ -718,10 +729,24 @@ proc skip(L: var TLexer, tok: var TToken) =
         inc(pos)
         inc(indent)
       tok.strongSpaceA = 0
-      if buf[pos] > ' ':
+      when defined(nimfix):
+        template doBreak(): expr = buf[pos] > ' '
+      else:
+        template doBreak(): expr =
+          buf[pos] > ' ' and (buf[pos] != '#' or buf[pos+1] == '#')
+      if doBreak():
         tok.indent = indent
         L.currLineIndent = indent
         break
+    of '#':
+      when defined(nimfix):
+        break
+      else:
+        # do not skip documentation comment:
+        if buf[pos+1] == '#': break
+        if buf[pos+1] == '[':
+          lexMessagePos(L, warnDeprecated, pos, "use '# [' instead; '#['")
+        while buf[pos] notin {CR, LF, nimlexbase.EndOfFile}: inc(pos)
     else:
       break                   # EndOfFile also leaves the loop
   L.bufpos = pos

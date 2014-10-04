@@ -1,6 +1,6 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2014 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -128,7 +128,7 @@ type
     obj: PType
     
   PEnv = ref TEnv
-  TEnv {.final.} = object of TObject
+  TEnv {.final.} = object of RootObj
     attachedNode, replacementNode: PNode
     createdVar: PNode        # if != nil it is a used environment; for closure
                              # iterators this can be 'envParam.env'
@@ -140,12 +140,12 @@ type
     fn: PSym                # function that belongs to this scope;
                             # if up.fn != fn then we cross function boundaries.
                             # This is an important case to consider.
-    vars: TIntSet           # variables belonging to this environment
+    vars: IntSet           # variables belonging to this environment
     
   TOuterContext = object
     fn: PSym # may also be a module!
     head: PEnv
-    capturedVars, processed: TIntSet
+    capturedVars, processed: IntSet
     localsToAccess: TIdNodeTable
     lambdasToEnv: TIdTable # PSym->PEnv mapping
 
@@ -949,7 +949,7 @@ proc liftLambdas*(fn: PSym, body: PNode): PNode =
       discard transformOuterProcBody(o, body, initIter(fn))
       result = ex
     finishEnvironments(o)
-    #if fn.name.s == "cbOuter":
+    #if fn.name.s == "parseLong":
     #  echo rendertree(result, {renderIds})
 
 proc liftLambdasForTopLevel*(module: PSym, body: PNode): PNode =

@@ -1,6 +1,6 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2013 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -15,7 +15,7 @@ proc intLiteral(i: BiggestInt): PRope =
   if (i > low(int32)) and (i <= high(int32)):
     result = toRope(i)
   elif i == low(int32):
-    # Nimrod has the same bug for the same reasons :-)
+    # Nim has the same bug for the same reasons :-)
     result = ~"(-2147483647 -1)"
   elif i > low(int64):
     result = rfmt(nil, "IL64($1)", toRope(i))
@@ -409,7 +409,6 @@ proc putDataIntoDest(p: BProc, d: var TLoc, t: PType, r: PRope) =
     d.k = locData
     d.t = getUniqueType(t)
     d.r = r
-    d.a = -1
 
 proc putIntoDest(p: BProc, d: var TLoc, t: PType, r: PRope) =
   var a: TLoc
@@ -425,7 +424,6 @@ proc putIntoDest(p: BProc, d: var TLoc, t: PType, r: PRope) =
     d.k = locExpr
     d.t = getUniqueType(t)
     d.r = r
-    d.a = -1
 
 proc binaryStmt(p: BProc, e: PNode, d: var TLoc, frmt: string) =
   var a, b: TLoc
@@ -723,7 +721,7 @@ proc genRecordField(p: BProc, e: PNode, d: var TLoc) =
         internalError(e.info, "genRecordField")
       field = lookupInRecord(ty.n, f.name)
       if field != nil: break
-      if gCmd != cmdCompileToCpp: app(r, ".Sup")
+      if not p.module.compileToCpp: app(r, ".Sup")
       ty = getUniqueType(ty.sons[0])
     if field == nil: internalError(e.info, "genRecordField 2 ")
     if field.loc.r == nil: internalError(e.info, "genRecordField 3")
@@ -775,7 +773,7 @@ proc genCheckedRecordField(p: BProc, e: PNode, d: var TLoc) =
       assert(ty.kind in {tyTuple, tyObject})
       field = lookupInRecord(ty.n, f.name)
       if field != nil: break
-      if gCmd != cmdCompileToCpp: app(r, ".Sup")
+      if not p.module.compileToCpp: app(r, ".Sup")
       ty = getUniqueType(ty.sons[0])
     if field == nil: internalError(e.info, "genCheckedRecordField")
     if field.loc.r == nil:
@@ -842,11 +840,11 @@ proc genSeqElem(p: BProc, e: PNode, d: var TLoc) =
     if ty.kind == tyString:
       linefmt(p, cpsStmts,
            "if ((NU)($1) > (NU)($2->$3)) #raiseIndexError();$n",
-           rdLoc(b), rdLoc(a), lenField())
+           rdLoc(b), rdLoc(a), lenField(p))
     else:
       linefmt(p, cpsStmts,
            "if ((NU)($1) >= (NU)($2->$3)) #raiseIndexError();$n",
-           rdLoc(b), rdLoc(a), lenField())
+           rdLoc(b), rdLoc(a), lenField(p))
   if d.k == locNone: d.s = OnHeap
   d.heapRoot = a.r
   if skipTypes(a.t, abstractVar).kind in {tyRef, tyPtr}:
@@ -908,7 +906,7 @@ proc gcUsage(n: PNode) =
   if gSelectedGC == gcNone: message(n.info, warnGcMem, n.renderTree)
 
 proc genStrConcat(p: BProc, e: PNode, d: var TLoc) =
-  #   <Nimrod code>
+  #   <Nim code>
   #   s = 'Hello ' & name & ', how do you feel?' & 'z'
   #
   #   <generated C code>
@@ -939,7 +937,7 @@ proc genStrConcat(p: BProc, e: PNode, d: var TLoc) =
       if e.sons[i + 1].kind in {nkStrLit..nkTripleStrLit}:
         inc(L, len(e.sons[i + 1].strVal))
       else:
-        appf(lens, "$1->$2 + ", [rdLoc(a), lenField()])
+        appf(lens, "$1->$2 + ", [rdLoc(a), lenField(p)])
       app(appends, rfmt(p.module, "#appendString($1, $2);$n", tmp.r, rdLoc(a)))
   linefmt(p, cpsStmts, "$1 = #rawNewString($2$3);$n", tmp.r, lens, toRope(L))
   app(p.s(cpsStmts), appends)
@@ -951,7 +949,7 @@ proc genStrConcat(p: BProc, e: PNode, d: var TLoc) =
   gcUsage(e)
 
 proc genStrAppend(p: BProc, e: PNode, d: var TLoc) =
-  #  <Nimrod code>
+  #  <Nim code>
   #  s &= 'Hello ' & name & ', how do you feel?' & 'z'
   #  // BUG: what if s is on the left side too?
   #  <generated C code>
@@ -979,7 +977,7 @@ proc genStrAppend(p: BProc, e: PNode, d: var TLoc) =
       if e.sons[i + 2].kind in {nkStrLit..nkTripleStrLit}:
         inc(L, len(e.sons[i + 2].strVal))
       else:
-        appf(lens, "$1->$2 + ", [rdLoc(a), lenField()])
+        appf(lens, "$1->$2 + ", [rdLoc(a), lenField(p)])
       app(appends, rfmt(p.module, "#appendString($1, $2);$n",
                         rdLoc(dest), rdLoc(a)))
   linefmt(p, cpsStmts, "$1 = #resizeString($1, $2$3);$n",
@@ -992,7 +990,7 @@ proc genSeqElemAppend(p: BProc, e: PNode, d: var TLoc) =
   # seq &= x  -->
   #    seq = (typeof seq) incrSeq(&seq->Sup, sizeof(x));
   #    seq->data[seq->len-1] = x;
-  let seqAppendPattern = if gCmd != cmdCompileToCpp:
+  let seqAppendPattern = if not p.module.compileToCpp:
                            "$1 = ($2) #incrSeq(&($1)->Sup, sizeof($3));$n"
                          else:
                            "$1 = ($2) #incrSeq($1, sizeof($3));$n"
@@ -1005,7 +1003,7 @@ proc genSeqElemAppend(p: BProc, e: PNode, d: var TLoc) =
       getTypeDesc(p.module, skipTypes(e.sons[2].typ, abstractVar))])
   keepAlive(p, a)
   initLoc(dest, locExpr, b.t, OnHeap)
-  dest.r = rfmt(nil, "$1->data[$1->$2-1]", rdLoc(a), lenField())
+  dest.r = rfmt(nil, "$1->data[$1->$2-1]", rdLoc(a), lenField(p))
   genAssignment(p, dest, b, {needToCopy, afDestIsNil})
   gcUsage(e)
 
@@ -1099,7 +1097,7 @@ proc genObjConstr(p: BProc, e: PNode, d: var TLoc) =
     while ty != nil:
       field = lookupInRecord(ty.n, it.sons[0].sym.name)
       if field != nil: break
-      if gCmd != cmdCompileToCpp: app(tmp2.r, ".Sup")
+      if not p.module.compileToCpp: app(tmp2.r, ".Sup")
       ty = getUniqueType(ty.sons[0])
     if field == nil or field.loc.r == nil: internalError(e.info, "genObjConstr")
     if it.len == 3 and optFieldCheck in p.options:
@@ -1200,8 +1198,8 @@ proc genOf(p: BProc, x: PNode, typ: PType, d: var TLoc) =
     if t.kind != tyVar: nilCheck = r
     r = rfmt(nil, "(*$1)", r)
     t = skipTypes(t.lastSon, typedescInst)
-  if gCmd != cmdCompileToCpp:
-    while (t.kind == tyObject) and (t.sons[0] != nil):
+  if not p.module.compileToCpp:
+    while t.kind == tyObject and t.sons[0] != nil:
       app(r, ~".Sup")
       t = skipTypes(t.sons[0], typedescInst)
   if isObjLackingTypeField(t):
@@ -1246,7 +1244,7 @@ proc genRepr(p: BProc, e: PNode, d: var TLoc) =
       putIntoDest(p, b, e.typ, ropef("$1, $1Len0", [rdLoc(a)]))
     of tyString, tySequence:
       putIntoDest(p, b, e.typ, 
-                  ropef("$1->data, $1->$2", [rdLoc(a), lenField()]))
+                  ropef("$1->data, $1->$2", [rdLoc(a), lenField(p)]))
     of tyArray, tyArrayConstr:
       putIntoDest(p, b, e.typ,
                   ropef("$1, $2", [rdLoc(a), toRope(lengthOrd(a.t))]))
@@ -1289,7 +1287,7 @@ proc genArrayLen(p: BProc, e: PNode, d: var TLoc, op: TMagic) =
     if op == mHigh: unaryExpr(p, e, d, "(strlen($1)-1)")
     else: unaryExpr(p, e, d, "strlen($1)")
   of tyString, tySequence:
-    if gCmd != cmdCompileToCpp:
+    if not p.module.compileToCpp:
       if op == mHigh: unaryExpr(p, e, d, "($1->Sup.len-1)")
       else: unaryExpr(p, e, d, "$1->Sup.len")
     else:
@@ -1307,7 +1305,7 @@ proc genSetLengthSeq(p: BProc, e: PNode, d: var TLoc) =
   initLocExpr(p, e.sons[1], a)
   initLocExpr(p, e.sons[2], b)
   var t = skipTypes(e.sons[1].typ, abstractVar)
-  let setLenPattern = if gCmd != cmdCompileToCpp:
+  let setLenPattern = if not p.module.compileToCpp:
       "$1 = ($3) #setLengthSeq(&($1)->Sup, sizeof($4), $2);$n"
     else:
       "$1 = ($3) #setLengthSeq($1, sizeof($4), $2);$n"
@@ -1508,7 +1506,6 @@ proc genCast(p: BProc, e: PNode, d: var TLoc) =
     linefmt(p, cpsLocals, "union { $1 source; $2 dest; } LOC$3;$n",
       getTypeDesc(p.module, srct), getTypeDesc(p.module, destt), lbl)
     tmp.k = locExpr
-    tmp.a = -1
     tmp.t = srct
     tmp.s = OnStack
     tmp.flags = {}
@@ -1564,11 +1561,11 @@ proc genStrEquals(p: BProc, e: PNode, d: var TLoc) =
   elif (a.kind in {nkStrLit..nkTripleStrLit}) and (a.strVal == ""):
     initLocExpr(p, e.sons[2], x)
     putIntoDest(p, d, e.typ,
-      rfmt(nil, "(($1) && ($1)->$2 == 0)", rdLoc(x), lenField()))
+      rfmt(nil, "(($1) && ($1)->$2 == 0)", rdLoc(x), lenField(p)))
   elif (b.kind in {nkStrLit..nkTripleStrLit}) and (b.strVal == ""):
     initLocExpr(p, e.sons[1], x)
     putIntoDest(p, d, e.typ,
-      rfmt(nil, "(($1) && ($1)->$2 == 0)", rdLoc(x), lenField()))
+      rfmt(nil, "(($1) && ($1)->$2 == 0)", rdLoc(x), lenField(p)))
   else:
     binaryExpr(p, e, d, "#eqStrings($1, $2)")
 
@@ -1827,7 +1824,7 @@ proc upConv(p: BProc, n: PNode, d: var TLoc) =
       if t.kind != tyVar: nilCheck = r
       r = ropef("(*$1)", [r])
       t = skipTypes(t.lastSon, abstractInst)
-    if gCmd != cmdCompileToCpp:
+    if not p.module.compileToCpp:
       while t.kind == tyObject and t.sons[0] != nil:
         app(r, ".Sup")
         t = skipTypes(t.sons[0], abstractInst)
@@ -1845,7 +1842,7 @@ proc upConv(p: BProc, n: PNode, d: var TLoc) =
                                    [getTypeDesc(p.module, dest), addrLoc(a)]))
 
 proc downConv(p: BProc, n: PNode, d: var TLoc) =
-  if gCmd == cmdCompileToCpp:
+  if p.module.compileToCpp:
     expr(p, n.sons[0], d)     # downcast does C++ for us
   else:
     var dest = skipTypes(n.typ, abstractPtrs)
@@ -2031,7 +2028,7 @@ proc expr(p: BProc, n: PNode, d: var TLoc) =
       initLocExpr(p, n.sons[0], a)
   of nkAsmStmt: genAsmStmt(p, n)
   of nkTryStmt:
-    if gCmd == cmdCompileToCpp: genTryCpp(p, n, d)
+    if p.module.compileToCpp: genTryCpp(p, n, d)
     else: genTry(p, n, d)
   of nkRaiseStmt: genRaiseStmt(p, n)
   of nkTypeSection:
@@ -2043,6 +2040,7 @@ proc expr(p: BProc, n: PNode, d: var TLoc) =
      nkFromStmt, nkTemplateDef, nkMacroDef: 
     discard
   of nkPragma: genPragma(p, n)
+  of nkPragmaBlock: expr(p, n.lastSon, d)
   of nkProcDef, nkMethodDef, nkConverterDef: 
     if (n.sons[genericParamsPos].kind == nkEmpty):
       var prc = n.sons[namePos].sym

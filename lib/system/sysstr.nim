@@ -1,6 +1,6 @@
 #
 #
-#            Nimrod's Runtime Library
+#            Nim's Runtime Library
 #        (c) Copyright 2012 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -119,7 +119,7 @@ proc addChar(s: NimString, c: char): NimString =
   inc(result.len)
 
 # These routines should be used like following:
-#   <Nimrod code>
+#   <Nim code>
 #   s &= "Hello " & name & ", how do you feel?"
 #
 #   <generated C code>
@@ -130,7 +130,7 @@ proc addChar(s: NimString, c: char): NimString =
 #     appendString(s, strLit3);
 #   }
 #
-#   <Nimrod code>
+#   <Nim code>
 #   s = "Hello " & name & ", how do you feel?"
 #
 #   <generated C code>
@@ -143,7 +143,7 @@ proc addChar(s: NimString, c: char): NimString =
 #     s = tmp0;
 #   }
 #
-#   <Nimrod code>
+#   <Nim code>
 #   s = ""
 #
 #   <generated C code>
@@ -217,7 +217,7 @@ proc setLengthSeq(seq: PGenericSeq, elemSize, newLen: int): PGenericSeq {.
           gch.tempStack.len = len0
       else:
         for i in newLen..result.len-1:
-          forAllChildrenAux(cast[pointer](cast[TAddress](result) +%
+          forAllChildrenAux(cast[pointer](cast[ByteAddress](result) +%
                             GenericSeqSize +% (i*%elemSize)),
                             extGetCellType(result).base, waZctDecRef)
       
@@ -227,7 +227,7 @@ proc setLengthSeq(seq: PGenericSeq, elemSize, newLen: int): PGenericSeq {.
     # presense of user defined destructors, the user will expect the cell to be
     # "destroyed" thus creating the same problem. We can destoy the cell in the
     # finalizer of the sequence, but this makes destruction non-deterministic.
-    zeroMem(cast[pointer](cast[TAddress](result) +% GenericSeqSize +%
+    zeroMem(cast[pointer](cast[ByteAddress](result) +% GenericSeqSize +%
            (newLen*%elemSize)), (result.len-%newLen) *% elemSize)
   result.len = newLen
 

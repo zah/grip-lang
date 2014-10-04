@@ -1,6 +1,6 @@
 #
 #
-#            Nimrod's Runtime Library
+#            Nim's Runtime Library
 #        (c) Copyright 2012 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -17,7 +17,7 @@ import
 type
   TRstParseOption* = enum     ## options for the RST parser 
     roSkipPounds,             ## skip ``#`` at line beginning (documentation
-                              ## embedded in Nimrod comments)
+                              ## embedded in Nim comments)
     roSupportSmilies,         ## make the RST parser support smilies like ``:)``
     roSupportRawDirective,    ## support the ``raw`` directive (don't support
                               ## it for sandboxing)
@@ -66,8 +66,8 @@ proc getArgument*(n: PRstNode): string
 # ----------------------------- scanner part --------------------------------
 
 const 
-  SymChars: TCharSet = {'a'..'z', 'A'..'Z', '0'..'9', '\x80'..'\xFF'}
-  SmileyStartChars: TCharSet = {':', ';', '8'}
+  SymChars: set[char] = {'a'..'z', 'A'..'Z', '0'..'9', '\x80'..'\xFF'}
+  SmileyStartChars: set[char] = {':', ';', '8'}
   Smilies = {
     ":D": "icon_e_biggrin",
     ":-D": "icon_e_biggrin",
@@ -111,21 +111,21 @@ const
 type
   TTokType = enum 
     tkEof, tkIndent, tkWhite, tkWord, tkAdornment, tkPunct, tkOther
-  TToken{.final.} = object    # a RST token
+  TToken = object             # a RST token
     kind*: TTokType           # the type of the token
     ival*: int                # the indentation or parsed integer value
     symbol*: string           # the parsed symbol as string
     line*, col*: int          # line and column of the token
   
   TTokenSeq = seq[TToken]
-  TLexer = object of TObject
+  TLexer = object of RootObj
     buf*: cstring
     bufpos*: int
     line*, col*, baseIndent*: int
     skipPounds*: bool
 
 
-proc getThing(L: var TLexer, tok: var TToken, s: TCharSet) = 
+proc getThing(L: var TLexer, tok: var TToken, s: set[char]) = 
   tok.kind = tkWord
   tok.line = L.line
   tok.col = L.col
@@ -273,7 +273,7 @@ type
     findFile: TFindFileHandler  # How to find files.
   
   PSharedState = ref TSharedState
-  TRstParser = object of TObject
+  TRstParser = object of RootObj
     idx*: int
     tok*: TTokenSeq
     s*: PSharedState
@@ -282,7 +282,7 @@ type
     line*, col*: int
     hasToc*: bool
 
-  EParseError* = object of EInvalidValue
+  EParseError* = object of ValueError
 
 proc whichMsgClass*(k: TMsgKind): TMsgClass =
   ## returns which message class `k` belongs to.

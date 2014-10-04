@@ -1,14 +1,14 @@
 #
 #
-#            Nimrod's Runtime Library
+#            Nim's Runtime Library
 #        (c) Copyright 2013 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
 #
 
-# Nimrod high-level memory manager: It supports Boehm's GC, no GC and the
-# native Nimrod GC. The native Nimrod GC is the default.
+# Nim high-level memory manager: It supports Boehm's GC, no GC and the
+# native Nim GC. The native Nim GC is the default.
 
 #{.push checks:on, assertions:on.}
 {.push checks:off.}
@@ -34,7 +34,7 @@ const
 
 type
   PPointer = ptr pointer
-  TByteArray = array[0..1000_0000, Byte]
+  TByteArray = array[0..1000_0000, byte]
   PByte = ptr TByteArray
   PString = ptr string
 
@@ -131,6 +131,14 @@ when defined(boehmgc):
       if result == nil: raiseOutOfMem()
     proc deallocShared(p: pointer) = boehmDealloc(p)
 
+    when hasThreadSupport:
+      proc getFreeSharedMem(): int =
+        boehmGetFreeBytes()
+      proc getTotalSharedMem(): int =
+        boehmGetHeapSize()
+      proc getOccupiedSharedMem(): int =
+        getTotalSharedMem() - getFreeSharedMem()
+
     #boehmGCincremental()
 
     proc GC_disable() = boehmGC_disable()
@@ -164,11 +172,11 @@ when defined(boehmgc):
   proc nimGCref(p: pointer) {.compilerproc, inline.} = discard
   proc nimGCunref(p: pointer) {.compilerproc, inline.} = discard
   
-  proc unsureAsgnRef(dest: ppointer, src: pointer) {.compilerproc, inline.} =
+  proc unsureAsgnRef(dest: PPointer, src: pointer) {.compilerproc, inline.} =
     dest[] = src
-  proc asgnRef(dest: ppointer, src: pointer) {.compilerproc, inline.} =
+  proc asgnRef(dest: PPointer, src: pointer) {.compilerproc, inline.} =
     dest[] = src
-  proc asgnRefNoCycle(dest: ppointer, src: pointer) {.compilerproc, inline.} =
+  proc asgnRefNoCycle(dest: PPointer, src: pointer) {.compilerproc, inline.} =
     dest[] = src
 
   type
@@ -180,7 +188,7 @@ when defined(boehmgc):
   proc alloc0(r: var TMemRegion, size: int): pointer =
     result = alloc(size)
     zeroMem(result, size)
-  proc dealloc(r: var TMemRegion, p: Pointer) = boehmDealloc(p)  
+  proc dealloc(r: var TMemRegion, p: pointer) = boehmDealloc(p)  
   proc deallocOsPages(r: var TMemRegion) {.inline.} = discard
   proc deallocOsPages() {.inline.} = discard
 
@@ -239,11 +247,11 @@ elif defined(nogc) and defined(useMalloc):
   proc nimGCref(p: pointer) {.compilerproc, inline.} = discard
   proc nimGCunref(p: pointer) {.compilerproc, inline.} = discard
   
-  proc unsureAsgnRef(dest: ppointer, src: pointer) {.compilerproc, inline.} =
+  proc unsureAsgnRef(dest: PPointer, src: pointer) {.compilerproc, inline.} =
     dest[] = src
-  proc asgnRef(dest: ppointer, src: pointer) {.compilerproc, inline.} =
+  proc asgnRef(dest: PPointer, src: pointer) {.compilerproc, inline.} =
     dest[] = src
-  proc asgnRefNoCycle(dest: ppointer, src: pointer) {.compilerproc, inline.} =
+  proc asgnRefNoCycle(dest: PPointer, src: pointer) {.compilerproc, inline.} =
     dest[] = src
 
   type
@@ -259,7 +267,7 @@ elif defined(nogc) and defined(useMalloc):
 
 elif defined(nogc):
   # Even though we don't want the GC, we cannot simply use C's memory manager
-  # because Nimrod's runtime wants ``realloc`` to zero out the additional
+  # because Nim's runtime wants ``realloc`` to zero out the additional
   # space which C's ``realloc`` does not. And we cannot get the old size of an
   # object, because C does not support this operation... Even though every
   # possible implementation has to have a way to determine the object's size.
@@ -292,15 +300,15 @@ elif defined(nogc):
   proc nimGCref(p: pointer) {.compilerproc, inline.} = discard
   proc nimGCunref(p: pointer) {.compilerproc, inline.} = discard
   
-  proc unsureAsgnRef(dest: ppointer, src: pointer) {.compilerproc, inline.} =
+  proc unsureAsgnRef(dest: PPointer, src: pointer) {.compilerproc, inline.} =
     dest[] = src
-  proc asgnRef(dest: ppointer, src: pointer) {.compilerproc, inline.} =
+  proc asgnRef(dest: PPointer, src: pointer) {.compilerproc, inline.} =
     dest[] = src
-  proc asgnRefNoCycle(dest: ppointer, src: pointer) {.compilerproc, inline.} =
+  proc asgnRefNoCycle(dest: PPointer, src: pointer) {.compilerproc, inline.} =
     dest[] = src
 
   var allocator {.rtlThreadVar.}: TMemRegion
-  InstantiateForRegion(allocator)
+  instantiateForRegion(allocator)
 
   include "system/cellsets"
 

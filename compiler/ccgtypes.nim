@@ -1,6 +1,6 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2013 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -162,7 +162,7 @@ proc mapReturnType(typ: PType): TCTypeKind =
   if skipTypes(typ, typedescInst).kind == tyArray: result = ctPtr
   else: result = mapType(typ)
   
-proc getTypeDescAux(m: BModule, typ: PType, check: var TIntSet): PRope
+proc getTypeDescAux(m: BModule, typ: PType, check: var IntSet): PRope
 proc needsComplexAssignment(typ: PType): bool = 
   result = containsGarbageCollectedRef(typ)
 
@@ -228,7 +228,7 @@ proc fillResult(param: PSym) =
     incl(param.loc.flags, lfIndirect)
     param.loc.s = OnUnknown
 
-proc getParamTypeDesc(m: BModule, t: PType, check: var TIntSet): PRope =
+proc getParamTypeDesc(m: BModule, t: PType, check: var IntSet): PRope =
   when false:
     if t.Kind in {tyRef, tyPtr, tyVar}:
       var b = skipTypes(t.lastson, typedescInst)
@@ -243,7 +243,7 @@ proc paramStorageLoc(param: PSym): TStorageLoc =
     result = OnUnknown
 
 proc genProcParams(m: BModule, t: PType, rettype, params: var PRope, 
-                   check: var TIntSet, declareEnvironment=true) = 
+                   check: var IntSet, declareEnvironment=true) = 
   params = nil
   if (t.sons[0] == nil) or isInvalidReturnType(t.sons[0]): 
     rettype = ~"void"
@@ -342,8 +342,8 @@ proc getTypePre(m: BModule, typ: PType): PRope =
 proc structOrUnion(t: PType): PRope =
   (if tfUnion in t.flags: toRope("union") else: toRope("struct"))
 
-proc getForwardStructFormat(): string = 
-  if gCmd == cmdCompileToCpp: result = "$1 $2;$n"
+proc getForwardStructFormat(m: BModule): string = 
+  if m.compileToCpp: result = "$1 $2;$n"
   else: result = "typedef $1 $2 $2;$n"
   
 proc getTypeForward(m: BModule, typ: PType): PRope = 
@@ -355,7 +355,7 @@ proc getTypeForward(m: BModule, typ: PType): PRope =
   of tySequence, tyTuple, tyObject: 
     result = getTypeName(typ)
     if not isImportedType(typ): 
-      appf(m.s[cfsForwardTypes], getForwardStructFormat(),
+      appf(m.s[cfsForwardTypes], getForwardStructFormat(m),
           [structOrUnion(typ), result])
     idTablePut(m.forwTypeCache, typ, result)
   else: internalError("getTypeForward(" & $typ.kind & ')')
@@ -370,7 +370,7 @@ proc mangleRecFieldName(field: PSym, rectype: PType): PRope =
   
 proc genRecordFieldsAux(m: BModule, n: PNode, 
                         accessExpr: PRope, rectype: PType, 
-                        check: var TIntSet): PRope = 
+                        check: var IntSet): PRope = 
   var 
     ae, uname, sname, a: PRope
     k: PNode
@@ -419,19 +419,19 @@ proc genRecordFieldsAux(m: BModule, n: PNode,
       appf(result, "$1 $2;$n", [getTypeDescAux(m, fieldType, check), sname])
   else: internalError(n.info, "genRecordFieldsAux()")
   
-proc getRecordFields(m: BModule, typ: PType, check: var TIntSet): PRope = 
+proc getRecordFields(m: BModule, typ: PType, check: var IntSet): PRope = 
   result = genRecordFieldsAux(m, typ.n, nil, typ, check)
 
 proc getRecordDesc(m: BModule, typ: PType, name: PRope, 
-                   check: var TIntSet): PRope = 
+                   check: var IntSet): PRope = 
   # declare the record:
   var hasField = false
 
   var attribute: PRope =
-    if tfPacked in typ.flags: toRope(CC[ccompiler].packedPragma)
+    if tfPacked in typ.flags: toRope(CC[cCompiler].packedPragma)
     else: nil
 
-  result = ropecg(m, CC[ccompiler].structStmtFmt, 
+  result = ropecg(m, CC[cCompiler].structStmtFmt, 
     [structOrUnion(typ), name, attribute])
 
   if typ.kind == tyObject: 
@@ -442,7 +442,7 @@ proc getRecordDesc(m: BModule, typ: PType, name: PRope,
       else: 
         appcg(m, result, " {$n#TNimType* m_type;$n", [name, attribute])
         hasField = true
-    elif gCmd == cmdCompileToCpp: 
+    elif m.compileToCpp:
       appcg(m, result, " : public $1 {$n", 
                       [getTypeDescAux(m, typ.sons[0], check)])
       hasField = true
@@ -461,7 +461,7 @@ proc getRecordDesc(m: BModule, typ: PType, name: PRope,
   app(result, "};" & tnl)
 
 proc getTupleDesc(m: BModule, typ: PType, name: PRope, 
-                  check: var TIntSet): PRope =
+                  check: var IntSet): PRope =
   result = ropef("$1 $2 {$n", [structOrUnion(typ), name])
   var desc: PRope = nil
   for i in countup(0, sonsLen(typ) - 1): 
@@ -474,7 +474,7 @@ proc getTupleDesc(m: BModule, typ: PType, name: PRope,
 proc pushType(m: BModule, typ: PType) = 
   add(m.typeStack, typ)
 
-proc getTypeDescAux(m: BModule, typ: PType, check: var TIntSet): PRope = 
+proc getTypeDescAux(m: BModule, typ: PType, check: var IntSet): PRope = 
   # returns only the type's name
   var 
     name, rettype, desc, recdesc: PRope
@@ -538,7 +538,7 @@ proc getTypeDescAux(m: BModule, typ: PType, check: var TIntSet): PRope =
     if result == nil: 
       result = getTypeName(t)
       if not isImportedType(t): 
-        appf(m.s[cfsForwardTypes], getForwardStructFormat(),
+        appf(m.s[cfsForwardTypes], getForwardStructFormat(m),
             [structOrUnion(t), result])
       idTablePut(m.forwTypeCache, t, result)
     assert(cacheGetType(m.typeCache, t) == nil)
@@ -550,7 +550,7 @@ proc getTypeDescAux(m: BModule, typ: PType, check: var TIntSet): PRope =
           cSeq = "struct $2 {$n" &
                  "  #TGenericSeq Sup;$n"
         appcg(m, m.s[cfsSeqTypes],
-            (if gCmd == cmdCompileToCpp: cppSeq else: cSeq) &
+            (if m.compileToCpp: cppSeq else: cSeq) &
             "  $1 data[SEQ_DECL_SIZE];$n" & 
             "};$n", [getTypeDescAux(m, t.sons[0], check), result])
       else: 
@@ -570,7 +570,7 @@ proc getTypeDescAux(m: BModule, typ: PType, check: var TIntSet): PRope =
     if result == nil: 
       result = getTypeName(t)
       if not isImportedType(t): 
-        appf(m.s[cfsForwardTypes], getForwardStructFormat(),
+        appf(m.s[cfsForwardTypes], getForwardStructFormat(m),
            [structOrUnion(t), result])
       idTablePut(m.forwTypeCache, t, result)
     idTablePut(m.typeCache, t, result) # always call for sideeffects:
@@ -898,7 +898,7 @@ include ccgtrav
 
 proc genDeepCopyProc(m: BModule; s: PSym; result: PRope) =
   genProc(m, s)
-  appf(m.s[cfsTypeInit3], "$1.deepcopy = (N_NIMCALL_PTR(void*, void*)) $2;$n",
+  appf(m.s[cfsTypeInit3], "$1.deepcopy =(void* (N_RAW_NIMCALL*)(void*))$2;$n",
      [result, s.loc.r])
 
 proc genTypeInfo(m: BModule, t: PType): PRope =

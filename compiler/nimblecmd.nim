@@ -1,13 +1,13 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2012 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
 #
 
-## Implements some helper procs for Babel (Nimrod's package manager) support.
+## Implements some helper procs for Nimble (Nim's package manager) support.
 
 import parseutils, strutils, strtabs, os, options, msgs, lists
 
@@ -43,7 +43,7 @@ proc `<.`(a, b: string): bool =
     if a[i] == '.': inc i
     if b[j] == '.': inc j
 
-proc addPackage(packages: PStringTable, p: string) =
+proc addPackage(packages: StringTableRef, p: string) =
   let x = versionSplitPos(p)
   let name = p.substr(0, x-1)
   if x < p.len:
@@ -53,12 +53,12 @@ proc addPackage(packages: PStringTable, p: string) =
   else:
     packages[name] = latest
 
-iterator chosen(packages: PStringTable): string =
+iterator chosen(packages: StringTableRef): string =
   for key, val in pairs(packages):
     let res = if val == latest: key else: key & '-' & val
     yield res
 
-proc addBabelPath(p: string, info: TLineInfo) =
+proc addNimblePath(p: string, info: TLineInfo) =
   if not contains(options.searchPaths, p):
     if gVerbosity >= 1: message(info, hintPath, p)
     lists.prependStr(options.lazyPaths, p)
@@ -70,10 +70,10 @@ proc addPathWithNimFiles(p: string, info: TLineInfo) =
         result = true
         break
   if hasNimFile(p):
-    addBabelPath(p, info)
+    addNimblePath(p, info)
   else:
     for kind, p2 in walkDir(p):
-      if hasNimFile(p2): addBabelPath(p2, info)
+      if hasNimFile(p2): addNimblePath(p2, info)
 
 proc addPathRec(dir: string, info: TLineInfo) =
   var packages = newStringTable(modeStyleInsensitive)
@@ -83,8 +83,8 @@ proc addPathRec(dir: string, info: TLineInfo) =
     if k == pcDir and p[pos] != '.':
       addPackage(packages, p)
   for p in packages.chosen:
-    addBabelPath(p, info)
+    addNimblePath(p, info)
 
-proc babelPath*(path: string, info: TLineInfo) =
+proc nimblePath*(path: string, info: TLineInfo) =
   addPathRec(path, info)
-  addBabelPath(path, info)
+  addNimblePath(path, info)

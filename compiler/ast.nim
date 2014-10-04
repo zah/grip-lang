@@ -1,6 +1,6 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2013 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -292,6 +292,8 @@ const
 
   sfNoRoot* = sfBorrow # a local variable is provably no root so it doesn't
                        # require RC ops
+  sfCompileToCpp* = sfInfixCall       # compile the module as C++ code
+  sfCompileToObjc* = sfNamedParamCall # compile the module as Objective-C code
 
 const
   # getting ready for the future expr/stmt merge
@@ -477,7 +479,7 @@ type
                           # and first phase symbol lookup in generics
     skConditional,        # symbol for the preprocessor (may become obsolete)
     skDynLib,             # symbol represents a dynamic library; this is used
-                          # internally; it does not exist in Nimrod code
+                          # internally; it does not exist in Nim code
     skParam,              # a parameter
     skGenericParam,       # a generic parameter; eq in ``proc x[eq=`==`]()``
     skTemp,               # a temporary variable (introduced by compiler)
@@ -502,7 +504,8 @@ type
     skStub,               # symbol is a stub and not yet loaded from the ROD
                           # file (it is loaded on demand, which may
                           # mean: never)
-    skPackage             # symbol is a package (used for canonicalization)
+    skPackage,            # symbol is a package (used for canonicalization)
+    skAlias               # an alias (needs to be resolved immediately)
   TSymKinds* = set[TSymKind]
 
 const
@@ -681,7 +684,7 @@ type
     heapRoot*: PRope          # keeps track of the enclosing heap object that
                               # owns this location (required by GC algorithms
                               # employing heap snapshots or sliding views)
-    a*: int                   # location's "address", i.e. slot for temporaries
+    #a*: int                   # location's "address", i.e. slot for temporaries
 
   # ---------------- end of backend information ------------------------------
 
@@ -734,8 +737,9 @@ type
       # check for the owner when touching 'usedGenerics'.
       usedGenerics*: seq[PInstantiation]
       tab*: TStrTable         # interface table for modules
+    of skLet, skVar, skField:
+      guard*: PSym
     else: nil
-
     magic*: TMagic
     typ*: PType
     name*: PIdent
@@ -772,6 +776,7 @@ type
                               # it won't cause problems
   
   TTypeSeq* = seq[PType]
+  TLockLevel* = distinct int16
   TType* {.acyclic.} = object of TIdObj # \
                               # types are identical iff they have the
                               # same id; there may be multiple copies of a type
@@ -798,11 +803,12 @@ type
     deepCopy*: PSym           # overriden 'deepCopy' operation
     size*: BiggestInt         # the size of the type in bytes
                               # -1 means that the size is unkwown
-    align*: int               # the type's alignment requirements
+    align*: int16             # the type's alignment requirements
+    lockLevel*: TLockLevel    # lock level as required for deadlock checking
     loc*: TLoc
 
   TPair*{.final.} = object 
-    key*, val*: PObject
+    key*, val*: RootRef
 
   TPairSeq* = seq[TPair]
   TTable*{.final.} = object   # the same as table[PObject] of PObject
@@ -811,7 +817,7 @@ type
 
   TIdPair*{.final.} = object 
     key*: PIdObj
-    val*: PObject
+    val*: RootRef
 
   TIdPairSeq* = seq[TIdPair]
   TIdTable*{.final.} = object # the same as table[PIdent] of PObject
@@ -838,7 +844,7 @@ type
     counter*: int
     data*: TNodePairSeq
 
-  TObjectSeq* = seq[PObject]
+  TObjectSeq* = seq[RootRef]
   TObjectSet*{.final.} = object 
     counter*: int
     data*: TObjectSeq
@@ -876,7 +882,7 @@ const
     tyProc, tyString, tyError}
   ExportableSymKinds* = {skVar, skConst, skProc, skMethod, skType,
     skIterator, skClosureIterator,
-    skMacro, skTemplate, skConverter, skEnumField, skLet, skStub}
+    skMacro, skTemplate, skConverter, skEnumField, skLet, skStub, skAlias}
   PersistentNodeFlags*: TNodeFlags = {nfBase2, nfBase8, nfBase16,
                                       nfDotSetter, nfDotField,
                                       nfIsRef}
@@ -1166,6 +1172,15 @@ proc newProcNode*(kind: TNodeKind, info: TLineInfo, body: PNode,
   result.sons = @[name, pattern, genericParams, params,
                   pragmas, exceptions, body]
 
+const
+  UnspecifiedLockLevel* = TLockLevel(-1'i16)
+  MaxLockLevel* = 1000'i16
+  UnknownLockLevel* = TLockLevel(1001'i16)
+
+proc `$`*(x: TLockLevel): string =
+  if x.ord == UnspecifiedLockLevel.ord: result = "<unspecified>"
+  elif x.ord == UnknownLockLevel.ord: result = "<unknown>"
+  else: result = $int16(x)
 
 proc newType(kind: TTypeKind, owner: PSym): PType = 
   new(result)
@@ -1174,10 +1189,11 @@ proc newType(kind: TTypeKind, owner: PSym): PType =
   result.size = - 1
   result.align = 2            # default alignment
   result.id = getID()
+  result.lockLevel = UnspecifiedLockLevel
   when debugIds:
     registerId(result)
-  #if result.id < 2000 then
-  #  MessageOut(typeKindToStr[kind] & ' has id: ' & toString(result.id))
+  #if result.id < 2000:
+  #  messageOut(typeKindToStr[kind] & ' has id: ' & toString(result.id))
   
 proc mergeLoc(a: var TLoc, b: TLoc) =
   if a.k == low(a.k): a.k = b.k
@@ -1185,7 +1201,7 @@ proc mergeLoc(a: var TLoc, b: TLoc) =
   a.flags = a.flags + b.flags
   if a.t == nil: a.t = b.t
   if a.r == nil: a.r = b.r
-  if a.a == 0: a.a = b.a
+  #if a.a == 0: a.a = b.a
   
 proc assignType(dest, src: PType) = 
   dest.kind = src.kind
@@ -1196,6 +1212,7 @@ proc assignType(dest, src: PType) =
   dest.align = src.align
   dest.destructor = src.destructor
   dest.deepCopy = src.deepCopy
+  dest.lockLevel = src.lockLevel
   # this fixes 'type TLock = TSysLock':
   if src.sym != nil:
     if dest.sym != nil:
@@ -1233,6 +1250,8 @@ proc copySym(s: PSym, keepId: bool = false): PSym =
   result.position = s.position
   result.loc = s.loc
   result.annex = s.annex      # BUGFIX
+  if result.kind in {skVar, skLet, skField}:
+    result.guard = s.guard
 
 proc createModuleAlias*(s: PSym, newIdent: PIdent, info: TLineInfo): PSym =
   result = newSym(s.kind, newIdent, s.owner, info)

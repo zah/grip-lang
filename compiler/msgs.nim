@@ -1,6 +1,6 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2013 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -123,12 +123,12 @@ type
     warnDifferentHeaps, warnWriteToForeignHeap, warnUnsafeCode,
     warnEachIdentIsTuple, warnShadowIdent, 
     warnProveInit, warnProveField, warnProveIndex, warnGcUnsafe, warnGcUnsafe2,
-    warnUninit, warnGcMem, warnUser,
+    warnUninit, warnGcMem, warnUnguardedAccess, warnUser,
     hintSuccess, hintSuccessX,
     hintLineTooLong, hintXDeclaredButNotUsed, hintConvToBaseNotNeeded,
     hintConvFromXtoItselfNotNeeded, hintExprAlwaysX, hintQuitCalled,
     hintProcessing, hintCodeBegin, hintCodeEnd, hintConf, hintPath,
-    hintConditionAlwaysTrue, hintPattern,
+    hintConditionAlwaysTrue, hintName, hintPattern,
     hintUser
 
 const 
@@ -377,7 +377,7 @@ const
     warnOctalEscape: "octal escape sequences do not exist; leading zero is ignored [OctalEscape]", 
     warnXIsNeverRead: "\'$1\' is never read [XIsNeverRead]", 
     warnXmightNotBeenInit: "\'$1\' might not have been initialized [XmightNotBeenInit]", 
-    warnDeprecated: "\'$1\' is deprecated [Deprecated]", 
+    warnDeprecated: "$1 is deprecated [Deprecated]", 
     warnConfigDeprecated: "config file '$1' is deprecated [ConfigDeprecated]",
     warnSmallLshouldNotBeUsed: "\'l\' should not be used as an identifier; may look like \'1\' (one) [SmallLshouldNotBeUsed]", 
     warnUnknownMagic: "unknown magic \'$1\' might crash the compiler [UnknownMagic]", 
@@ -396,9 +396,10 @@ const
     warnProveField: "cannot prove that field '$1' is accessible [ProveField]",
     warnProveIndex: "cannot prove index '$1' is valid [ProveIndex]",
     warnGcUnsafe: "not GC-safe: '$1' [GcUnsafe]",
-    warnGcUnsafe2: "cannot prove '$1' is GC-safe. This will become a compile time error in the future.",
+    warnGcUnsafe2: "cannot prove '$1' is GC-safe. Does not compile with --threads:on.",
     warnUninit: "'$1' might not have been initialized [Uninit]",
     warnGcMem: "'$1' uses GC'ed memory [GcMem]",
+    warnUnguardedAccess: "'$1' is accessed without its guard [UnguardedAccess]",
     warnUser: "$1 [User]", 
     hintSuccess: "operation successful [Success]", 
     hintSuccessX: "operation successful ($# lines compiled; $# sec total; $#) [SuccessX]", 
@@ -414,11 +415,12 @@ const
     hintConf: "used config file \'$1\' [Conf]", 
     hintPath: "added path: '$1' [Path]",
     hintConditionAlwaysTrue: "condition is always true: '$1' [CondTrue]",
+    hintName: "name should be: '$1' [Name]",
     hintPattern: "$1 [Pattern]",
     hintUser: "$1 [User]"]
 
 const
-  WarningsToStr*: array[0..26, string] = ["CannotOpenFile", "OctalEscape", 
+  WarningsToStr*: array[0..27, string] = ["CannotOpenFile", "OctalEscape", 
     "XIsNeverRead", "XmightNotBeenInit",
     "Deprecated", "ConfigDeprecated",
     "SmallLshouldNotBeUsed", "UnknownMagic", 
@@ -427,12 +429,12 @@ const
     "AnalysisLoophole", "DifferentHeaps", "WriteToForeignHeap",
     "UnsafeCode", "EachIdentIsTuple", "ShadowIdent", 
     "ProveInit", "ProveField", "ProveIndex", "GcUnsafe", "GcUnsafe2", "Uninit",
-    "GcMem", "User"]
+    "GcMem", "UnguardedAccess", "User"]
 
-  HintsToStr*: array[0..15, string] = ["Success", "SuccessX", "LineTooLong", 
+  HintsToStr*: array[0..16, string] = ["Success", "SuccessX", "LineTooLong", 
     "XDeclaredButNotUsed", "ConvToBaseNotNeeded", "ConvFromXtoItselfNotNeeded", 
     "ExprAlwaysX", "QuitCalled", "Processing", "CodeBegin", "CodeEnd", "Conf", 
-    "Path", "CondTrue", "Pattern",
+    "Path", "CondTrue", "Name", "Pattern",
     "User"]
 
 const 
@@ -450,7 +452,7 @@ type
   TNoteKinds* = set[TNoteKind]
 
   TFileInfo*{.final.} = object 
-    fullPath*: string          # This is a canonical full filesystem path
+    fullPath: string           # This is a canonical full filesystem path
     projPath*: string          # This is relative to the project's root
     shortName*: string         # short name of the module
     quotedName*: PRope         # cached quoted short name for codegen
@@ -477,8 +479,8 @@ type
 
   TErrorOutputs* = set[TErrorOutput]
 
-  ERecoverableError* = object of EInvalidValue
-  ESuggestDone* = object of E_Base
+  ERecoverableError* = object of ValueError
+  ESuggestDone* = object of Exception
 
   TPos* = tuple[line, col: int16]
 
@@ -586,7 +588,7 @@ var
   gErrorMax*: int = 1         # stop after gErrorMax errors
 
 when useCaas:
-  var stdoutSocket*: TSocket
+  var stdoutSocket*: Socket
 
 proc unknownLineInfo*(): TLineInfo =
   result.line = int16(-1)
@@ -877,7 +879,7 @@ proc sourceLine*(i: TLineInfo): PRope =
     try:
       for line in lines(i.toFullPath):
         addSourceLine i.fileIndex, line.string
-    except EIO:
+    except IOError:
       discard
   internalAssert i.fileIndex < fileInfos.len
   # can happen if the error points to EOF:

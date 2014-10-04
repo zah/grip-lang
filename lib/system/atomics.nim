@@ -1,13 +1,13 @@
 #
 #
-#            Nimrod's Runtime Library
+#            Nim's Runtime Library
 #        (c) Copyright 2014 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
 #
 
-# Atomic operations for Nimrod.
+# Atomic operations for Nim.
 {.push stackTrace:off.}
 
 const someGcc = defined(gcc) or defined(llvm_gcc) or defined(clang)
@@ -31,7 +31,7 @@ when someGcc and hasThreadSupport:
                        ## with acquire loads 
                        ## and release stores in all threads.
 
-    TAtomType* = TNumber|pointer|ptr|char
+    TAtomType* = SomeNumber|pointer|ptr|char
       ## Type Class representing valid types for use with atomic procs
 
   proc atomicLoadN*[T: TAtomType](p: ptr T, mem: AtomMemModel): T {.
@@ -159,6 +159,7 @@ when someGcc and hasThreadSupport:
 elif defined(vcc) and hasThreadSupport:
   proc addAndFetch*(p: ptr int, val: int): int {.
     importc: "NimXadd", nodecl.}
+  proc fence*() {.importc: "_ReadWriteBarrier", header: "<intrin.h>".}
 
 else:
   proc addAndFetch*(p: ptr int, val: int): int {.inline.} =

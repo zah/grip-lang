@@ -1,6 +1,6 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2014 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -320,7 +320,7 @@ proc analyse(c: var AnalysisCtx; n: PNode) =
       # since we already ensure sfAddrTaken is not in s.flags, we only need to
       # prevent direct assignments to the monotonic variable:
       let slot = c.getSlot(n[0].sym)
-      slot.blackListed = true
+      slot.blacklisted = true
     invalidateFacts(c.guards, n[0])
     analyseSons(c, n)
     addAsgnFact(c.guards, n[0], n[1])
@@ -335,7 +335,7 @@ proc analyse(c: var AnalysisCtx; n: PNode) =
     localError(n.info, "invalid control flow for 'parallel'")
     # 'break' that leaves the 'parallel' section is not valid either
     # or maybe we should generate a 'try' XXX
-  of nkVarSection:
+  of nkVarSection, nkLetSection:
     for it in n:
       let value = it.lastSon
       if value.kind != nkEmpty:
@@ -396,7 +396,7 @@ proc transformSpawnSons(owner: PSym; n, barrier: PNode): PNode =
 
 proc transformSpawn(owner: PSym; n, barrier: PNode): PNode =
   case n.kind
-  of nkVarSection:
+  of nkVarSection, nkLetSection:
     result = nil
     for it in n:
       let b = it.lastSon
@@ -464,6 +464,6 @@ proc liftParallel*(owner: PSym; n: PNode): PNode =
   result = newNodeI(nkStmtList, n.info)
   generateAliasChecks(a, result)
   result.add varSection
-  result.add callCodeGenProc("openBarrier", barrier)
+  result.add callCodegenProc("openBarrier", barrier)
   result.add transformSpawn(owner, body, barrier)
-  result.add callCodeGenProc("closeBarrier", barrier)
+  result.add callCodegenProc("closeBarrier", barrier)

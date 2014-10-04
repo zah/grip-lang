@@ -1,6 +1,6 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2013 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -13,6 +13,7 @@
 proc semTemplateExpr(c: PContext, n: PNode, s: PSym,
                      flags: TExprFlags = {}): PNode =
   markUsed(n.info, s)
+  styleCheckUse(n.info, s)
   pushInfoContext(n.info)
   result = evalTemplate(n, s, getCurrOwner())
   if efNoSemCheck notin flags: result = semAfterMacroCall(c, result, s, flags)
@@ -79,6 +80,7 @@ proc semSym(c: PContext, n: PNode, s: PSym, flags: TExprFlags): PNode =
   case s.kind
   of skConst:
     markUsed(n.info, s)
+    styleCheckUse(n.info, s)
     case skipTypes(s.typ, abstractInst-{tyTypeDesc}).kind
     of  tyNil, tyChar, tyInt..tyInt64, tyFloat..tyFloat128, 
         tyTuple, tySet, tyUInt..tyUInt64:
@@ -103,6 +105,7 @@ proc semSym(c: PContext, n: PNode, s: PSym, flags: TExprFlags): PNode =
   of skTemplate: result = semTemplateExpr(c, n, s, flags)
   of skVar, skLet, skResult, skParam, skForVar:
     markUsed(n.info, s)
+    styleCheckUse(n.info, s)
     # if a proc accesses a global variable, it is not side effect free:
     if sfGlobal in s.flags:
       incl(c.p.owner.flags, sfSideEffect)
@@ -115,6 +118,7 @@ proc semSym(c: PContext, n: PNode, s: PSym, flags: TExprFlags): PNode =
     # var len = 0 # but won't be called
     # genericThatUsesLen(x) # marked as taking a closure?
   of skGenericParam:
+    styleCheckUse(n.info, s)
     if s.typ.kind == tyStatic:
       result = newSymNode(s, n.info)
       result.typ = s.typ
@@ -125,12 +129,14 @@ proc semSym(c: PContext, n: PNode, s: PSym, flags: TExprFlags): PNode =
       return n
   of skType:
     markUsed(n.info, s)
+    styleCheckUse(n.info, s)
     if s.typ.kind == tyStatic and s.typ.n != nil:
       return s.typ.n
     result = newSymNode(s, n.info)
     result.typ = makeTypeDesc(c, s.typ)
   else:
     markUsed(n.info, s)
+    styleCheckUse(n.info, s)
     result = newSymNode(s, n.info)
 
 type
@@ -259,6 +265,7 @@ proc semConv(c: PContext, n: PNode): PNode =
       let status = checkConvertible(c, result.typ, it.typ)
       if status in {convOK, convNotNeedeed}:
         markUsed(n.info, it.sym)
+        styleCheckUse(n.info, it.sym)
         markIndirect(c, it.sym)
         return it
     localError(n.info, errUseQualifier, op.sons[0].sym.name.s)
@@ -360,6 +367,7 @@ proc isOpImpl(c: PContext, n: PNode): PNode =
       result = newIntNode(nkIntLit, ord(t.kind == tyProc and
                                         t.callConv == ccClosure and 
                                         tfIterator notin t.flags))
+    else: discard
   else:
     var t2 = n[2].typ.skipTypes({tyTypeDesc})
     maybeLiftType(t2, c, n.info)
@@ -662,7 +670,7 @@ proc evalAtCompileTime(c: PContext, n: PNode): PNode =
 
   # optimization pass: not necessary for correctness of the semantic pass
   if {sfNoSideEffect, sfCompileTime} * callee.flags != {} and
-     {sfForward, sfImportc} * callee.flags == {}:
+     {sfForward, sfImportc} * callee.flags == {} and n.typ != nil:
     if sfCompileTime notin callee.flags and 
         optImplicitStatic notin gOptions: return
 
@@ -981,6 +989,7 @@ proc builtinFieldAccess(c: PContext, n: PNode, flags: TExprFlags): PNode =
   var s = qualifiedLookUp(c, n, {checkAmbiguity, checkUndeclared})
   if s != nil:
     markUsed(n.sons[1].info, s)
+    styleCheckUse(n.sons[1].info, s)
     return semSym(c, n, s, flags)
 
   n.sons[0] = semExprWithType(c, n.sons[0], flags+{efDetermineType})
@@ -1004,6 +1013,7 @@ proc builtinFieldAccess(c: PContext, n: PNode, flags: TExprFlags): PNode =
         result.info = n.info
         result.typ = ty
         markUsed(n.info, f)
+        styleCheckUse(n.info, f)
         return
     of tyTypeParamsHolders:
       return readTypeParameter(c, ty, i, n.info)
@@ -1036,12 +1046,13 @@ proc builtinFieldAccess(c: PContext, n: PNode, flags: TExprFlags): PNode =
       if fieldVisible(c, f):
         # is the access to a public field or in the same module or in a friend?
         markUsed(n.sons[1].info, f)
+        styleCheckUse(n.sons[1].info, f)
         n.sons[0] = makeDeref(n.sons[0])
         n.sons[1] = newSymNode(f) # we now have the correct field
         n.typ = f.typ
-        if check == nil: 
+        if check == nil:
           result = n
-        else: 
+        else:
           check.sons[0] = n
           check.typ = n.typ
           result = check
@@ -1049,6 +1060,7 @@ proc builtinFieldAccess(c: PContext, n: PNode, flags: TExprFlags): PNode =
     f = getSymFromList(ty.n, i)
     if f != nil:
       markUsed(n.sons[1].info, f)
+      styleCheckUse(n.sons[1].info, f)
       n.sons[0] = makeDeref(n.sons[0])
       n.sons[1] = newSymNode(f)
       n.typ = f.typ
@@ -1465,6 +1477,7 @@ proc semExpandToAst(c: PContext, n: PNode): PNode =
 
   macroCall.sons[0] = newSymNode(expandedSym, macroCall.info)
   markUsed(n.info, expandedSym)
+  styleCheckUse(n.info, expandedSym)
 
   for i in countup(1, macroCall.len-1):
     macroCall.sons[i] = semExprWithType(c, macroCall[i], {})
@@ -1614,6 +1627,10 @@ proc instantiateCreateFlowVarCall(c: PContext; t: PType;
   initIdTable(bindings)
   bindings.idTablePut(sym.ast[genericParamsPos].sons[0].typ, t)
   result = c.semGenerateInstance(c, sym, bindings, info)
+  # since it's an instantiation, we unmark it as a compilerproc. Otherwise
+  # codegen would fail:
+  result.flags = result.flags - {sfCompilerProc, sfExportC, sfImportC}
+  result.loc.r = nil
 
 proc setMs(n: PNode, s: PSym): PNode = 
   result = n
@@ -1816,7 +1833,7 @@ proc semTuplePositionsConstr(c: PContext, n: PNode, flags: TExprFlags): PNode =
     addSonSkipIntLit(typ, n.sons[i].typ)
   result.typ = typ
 
-proc checkInitialized(n: PNode, ids: TIntSet, info: TLineInfo) =
+proc checkInitialized(n: PNode, ids: IntSet, info: TLineInfo) =
   case n.kind
   of nkRecList:
     for i in countup(0, sonsLen(n) - 1):
@@ -1897,6 +1914,7 @@ proc semBlock(c: PContext, n: PNode): PNode =
       addDecl(c, labl)
       n.sons[0] = newSymNode(labl, n.sons[0].info)
     suggestSym(n.sons[0].info, labl)
+    styleCheckDef(labl)
   n.sons[1] = semExpr(c, n.sons[1])
   n.typ = n.sons[1].typ
   if isEmptyType(n.typ): n.kind = nkBlockStmt
@@ -2018,9 +2036,9 @@ proc semExpr(c: PContext, n: PNode, flags: TExprFlags = {}): PNode =
     checkMinSonsLen(n, 1)
     let mode = if nfDotField in n.flags: {} else: {checkUndeclared}
     var s = qualifiedLookUp(c, n.sons[0], mode)
-    if s != nil: 
-      if gCmd == cmdPretty and n.sons[0].kind == nkDotExpr:
-        pretty.checkUse(n.sons[0].sons[1].info, s)
+    if s != nil:
+      #if gCmd == cmdPretty and n.sons[0].kind == nkDotExpr:
+      #  pretty.checkUse(n.sons[0].sons[1].info, s)
       case s.kind
       of skMacro:
         if sfImmediate notin s.flags:

@@ -1,7 +1,7 @@
 #
 #
-#            Nimrod's Runtime Library
-#        (c) Copyright 2012 Nimrod Contributors
+#            Nim's Runtime Library
+#        (c) Copyright 2012 Nim Contributors
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
@@ -26,19 +26,22 @@ when not defined(ECMAScript):
   import terminal
 
 type
-  TTestStatus* = enum OK, FAILED
-  TOutputLevel* = enum PRINT_ALL, PRINT_FAILURES, PRINT_NONE
+  TestStatus* = enum OK, FAILED
+  OutputLevel* = enum PRINT_ALL, PRINT_FAILURES, PRINT_NONE
+
+{.deprecated: [TTestStatus: TestStatus, TOutputLevel: OutputLevel]}
 
 var 
-  # XXX: These better be thread-local
-  AbortOnError*: bool
-  OutputLevel*: TOutputLevel
-  ColorOutput*: bool
+  abortOnError* {.threadvar.}: bool
+  outputLevel* {.threadvar.}: OutputLevel
+  colorOutput* {.threadvar.}: bool
   
-  checkpoints: seq[string] = @[]
+  checkpoints {.threadvar.}: seq[string]
 
-template TestSetupIMPL*: stmt {.immediate, dirty.} = discard
-template TestTeardownIMPL*: stmt {.immediate, dirty.} = discard
+checkpoints = @[]
+
+template testSetupIMPL*: stmt {.immediate, dirty.} = discard
+template testTeardownIMPL*: stmt {.immediate, dirty.} = discard
 
 proc shouldRun(testName: string): bool =
   result = true
@@ -46,21 +49,21 @@ proc shouldRun(testName: string): bool =
 template suite*(name: expr, body: stmt): stmt {.immediate, dirty.} =
   block:
     template setup*(setupBody: stmt): stmt {.immediate, dirty.} =
-      template TestSetupIMPL: stmt {.immediate, dirty.} = setupBody
+      template testSetupIMPL: stmt {.immediate, dirty.} = setupBody
 
     template teardown*(teardownBody: stmt): stmt {.immediate, dirty.} =
-      template TestTeardownIMPL: stmt {.immediate, dirty.} = teardownBody
+      template testTeardownIMPL: stmt {.immediate, dirty.} = teardownBody
 
     body
 
-proc testDone(name: string, s: TTestStatus) =
+proc testDone(name: string, s: TestStatus) =
   if s == FAILED:
-    program_result += 1
+    programResult += 1
 
-  if OutputLevel != PRINT_NONE and (OutputLevel == PRINT_ALL or s == FAILED):
+  if outputLevel != PRINT_NONE and (outputLevel == PRINT_ALL or s == FAILED):
     template rawPrint() = echo("[", $s, "] ", name, "\n")
     when not defined(ECMAScript):
-      if ColorOutput and not defined(ECMAScript):
+      if colorOutput and not defined(ECMAScript):
         var color = (if s == OK: fgGreen else: fgRed)
         styledEcho styleBright, color, "[", $s, "] ", fgWhite, name, "\n"
       else:
@@ -73,10 +76,10 @@ template test*(name: expr, body: stmt): stmt {.immediate, dirty.} =
 
   if shouldRun(name):
     checkpoints = @[]
-    var TestStatusIMPL {.inject.} = OK
+    var testStatusIMPL {.inject.} = OK
     
     try:
-      TestSetupIMPL()
+      testSetupIMPL()
       body
 
     except:
@@ -84,8 +87,8 @@ template test*(name: expr, body: stmt): stmt {.immediate, dirty.} =
       fail()
 
     finally:
-      TestTeardownIMPL()
-      testDone name, TestStatusIMPL
+      testTeardownIMPL()
+      testDone name, testStatusIMPL
 
 proc checkpoint*(msg: string) =
   checkpoints.add(msg)
@@ -97,12 +100,12 @@ template fail* =
     echo msg
 
   when not defined(ECMAScript):
-    if AbortOnError: quit(1)
+    if abortOnError: quit(1)
  
-  when declared(TestStatusIMPL):
-    TestStatusIMPL = FAILED
+  when declared(testStatusIMPL):
+    testStatusIMPL = FAILED
   else:
-    program_result += 1
+    programResult += 1
 
   checkpoints = @[]
 
@@ -192,15 +195,15 @@ when declared(stdout):
   ## Reading settings
   var envOutLvl = os.getEnv("NIMTEST_OUTPUT_LVL").string
 
-  AbortOnError = existsEnv("NIMTEST_ABORT_ON_ERROR")
-  ColorOutput  = not existsEnv("NIMTEST_NO_COLOR")
+  abortOnError = existsEnv("NIMTEST_ABORT_ON_ERROR")
+  colorOutput  = not existsEnv("NIMTEST_NO_COLOR")
 
 else:
   var envOutLvl = "" # TODO
-  ColorOutput  = false
+  colorOutput  = false
 
 if envOutLvl.len > 0:
-  for opt in countup(low(TOutputLevel), high(TOutputLevel)):
+  for opt in countup(low(OutputLevel), high(OutputLevel)):
     if $opt == envOutLvl:
-      OutputLevel = opt
+      outputLevel = opt
       break

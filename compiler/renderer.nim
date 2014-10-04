@@ -1,13 +1,13 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2013 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
 #
 
-# This module implements the renderer of the standard Nimrod representation.
+# This module implements the renderer of the standard Nim representation.
 
 import 
   lexer, options, idents, strutils, ast, msgs, lists
@@ -1009,9 +1009,9 @@ proc gsub(g: var TSrcGen, n: PNode, c: TContext) =
     put(g, tkElse, " else")
     putWithSpace(g, tkColon, ":")
     gsub(g, n.sons[0])
-  of nkTypeOfExpr: 
+  of nkTypeOfExpr:
     putWithSpace(g, tkType, "type")
-    gsub(g, n.sons[0])
+    if n.len > 0: gsub(g, n.sons[0])
   of nkRefTy: 
     if sonsLen(n) > 0:
       putWithSpace(g, tkRef, "ref")
@@ -1306,7 +1306,7 @@ proc renderTree(n: PNode, renderFlags: TRenderFlags = {}): string =
 proc renderModule(n: PNode, filename: string, 
                   renderFlags: TRenderFlags = {}) =
   var
-    f: TFile
+    f: File
     g: TSrcGen
   initSrcGen(g, renderFlags)
   for i in countup(0, sonsLen(n) - 1):

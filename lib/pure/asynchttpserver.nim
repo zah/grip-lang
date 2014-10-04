@@ -1,6 +1,6 @@
 #
 #
-#            Nimrod's Runtime Library
+#            Nim's Runtime Library
 #        (c) Copyright 2014 Dominik Picheta
 #
 #    See the file "copying.txt", included in this
@@ -9,11 +9,24 @@
 
 ## This module implements a high performance asynchronous HTTP server.
 ##
-## **Note:** This module is still largely experimental.
+## Examples
+## --------
+##
+## This example will create an HTTP server on port 8080. The server will
+## respond to all requests with a ``200 OK`` response code and "Hello World"
+## as the response body.
+##
+## .. code-block::nim
+##    var server = newAsyncHttpServer()
+##    proc cb(req: TRequest) {.async.} =
+##      await req.respond(Http200, "Hello World")
+##
+##    asyncCheck server.serve(Port(8080), cb)
+##    runForever()
 
 import strtabs, asyncnet, asyncdispatch, parseutils, uri, strutils
 type
-  TRequest* = object
+  Request* = object
     client*: PAsyncSocket # TODO: Separate this into a Response object?
     reqMethod*: string
     headers*: PStringTable
@@ -22,10 +35,10 @@ type
     hostname*: string ## The hostname of the client that made the request.
     body*: string
 
-  PAsyncHttpServer* = ref object
+  AsyncHttpServer* = ref object
     socket: PAsyncSocket
 
-  THttpCode* = enum
+  HttpCode* = enum
     Http200 = "200 OK",
     Http303 = "303 Moved",
     Http400 = "400 Bad Request",
@@ -33,9 +46,12 @@ type
     Http500 = "500 Internal Server Error",
     Http502 = "502 Bad Gateway"
 
-  THttpVersion* = enum
+  HttpVersion* = enum
     HttpVer11,
     HttpVer10
+
+{.deprecated: [TRequest: Request, PAsyncHttpServer: AsyncHttpServer,
+  THttpCode: HttpCode, THttpVersion: HttpVersion].}
 
 proc `==`*(protocol: tuple[orig: string, major, minor: int],
            ver: THttpVersion): bool =
@@ -49,13 +65,14 @@ proc `==`*(protocol: tuple[orig: string, major, minor: int],
   result = protocol.major == major and protocol.minor == minor
 
 proc newAsyncHttpServer*(): PAsyncHttpServer =
+  ## Creates a new ``AsyncHttpServer`` instance.
   new result
 
 proc addHeaders(msg: var string, headers: PStringTable) =
   for k, v in headers:
     msg.add(k & ": " & v & "\c\L")
 
-proc sendHeaders*(req: TRequest, headers: PStringTable): PFuture[void] =
+proc sendHeaders*(req: TRequest, headers: PStringTable): Future[void] =
   ## Sends the specified headers to the requesting client.
   var msg = ""
   addHeaders(msg, headers)
@@ -93,13 +110,13 @@ proc parseProtocol(protocol: string): tuple[orig: string, major, minor: int] =
   i.inc # Skip .
   i.inc protocol.parseInt(result.minor, i)
 
-proc sendStatus(client: PAsyncSocket, status: string): PFuture[void] =
+proc sendStatus(client: PAsyncSocket, status: string): Future[void] =
   client.send("HTTP/1.1 " & status & "\c\L")
 
 proc processClient(client: PAsyncSocket, address: string,
                    callback: proc (request: TRequest):
-                      PFuture[void] {.closure, gcsafe.}) {.async.} =
-  while true:
+                      Future[void] {.closure, gcsafe.}) {.async.} =
+  while not client.closed:
     # GET /path HTTP/1.1
     # Header: val
     # \n
@@ -180,12 +197,13 @@ proc processClient(client: PAsyncSocket, address: string,
       # header states otherwise.
       # In HTTP 1.0 we assume that the connection should not be persistent.
       # Unless the connection header states otherwise.
+      discard
     else:
       request.client.close()
       break
 
-proc serve*(server: PAsyncHttpServer, port: TPort,
-            callback: proc (request: TRequest): PFuture[void] {.closure,gcsafe.},
+proc serve*(server: PAsyncHttpServer, port: Port,
+            callback: proc (request: TRequest): Future[void] {.closure,gcsafe.},
             address = "") {.async.} =
   ## Starts the process of listening for incoming HTTP connections on the
   ## specified address and port.
@@ -217,6 +235,6 @@ when isMainModule:
           "Content-type": "text/plain; charset=utf-8"}
       await req.respond(Http200, "Hello World", headers.newStringTable())
 
-    asyncCheck server.serve(TPort(5555), cb)
+    asyncCheck server.serve(Port(5555), cb)
     runForever()
   main()

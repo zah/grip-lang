@@ -1,6 +1,6 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2014 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -43,18 +43,18 @@ type
 proc debugInfo(info: TLineInfo): string =
   result = info.toFilename.splitFile.name & ":" & $info.line
 
-proc codeListing(c: PCtx, result: var string, start=0) =
+proc codeListing(c: PCtx, result: var string, start=0; last = -1) =
   # first iteration: compute all necessary labels:
   var jumpTargets = initIntSet()
-  
-  for i in start.. < c.code.len:
+  let last = if last < 0: c.code.len-1 else: min(last, c.code.len-1)
+  for i in start..last:
     let x = c.code[i]
     if x.opcode in relativeJumps:
       jumpTargets.incl(i+x.regBx-wordExcess)
 
   # for debugging purposes
   var i = start
-  while i < c.code.len:
+  while i <= last:
     if i in jumpTargets: result.addf("L$1:\n", i)
     let x = c.code[i]
 
@@ -82,9 +82,9 @@ proc codeListing(c: PCtx, result: var string, start=0) =
     result.add("\n")
     inc i
 
-proc echoCode*(c: PCtx, start=0) {.deprecated.} =
+proc echoCode*(c: PCtx; start=0; last = -1) {.deprecated.} =
   var buf = ""
-  codeListing(c, buf, start)
+  codeListing(c, buf, start, last)
   echo buf
 
 proc gABC(ctx: PCtx; n: PNode; opc: TOpcode; a, b, c: TRegister = 0) =
@@ -495,6 +495,7 @@ proc genCall(c: PCtx; n: PNode; dest: var TDest) =
   c.freeTempRange(x, n.len)
 
 template isGlobal(s: PSym): bool = sfGlobal in s.flags and s.kind != skForVar
+proc isGlobal(n: PNode): bool = n.kind == nkSym and isGlobal(n.sym)
 
 proc needsAsgnPatch(n: PNode): bool = 
   n.kind in {nkBracketExpr, nkDotExpr, nkCheckedFieldExpr,
@@ -637,8 +638,10 @@ proc genBinaryStmt(c: PCtx; n: PNode; opc: TOpcode) =
   c.freeTemp(tmp)
 
 proc genBinaryStmtVar(c: PCtx; n: PNode; opc: TOpcode) =
+  var x = n.sons[1]
+  if x.kind in {nkAddr, nkHiddenAddr}: x = x.sons[0]
   let
-    dest = c.genx(n.sons[1], {gfAddrOf})
+    dest = c.genx(x)
     tmp = c.genx(n.sons[2])
   c.gABC(n, opc, dest, tmp, 0)
   #c.genAsgnPatch(n.sons[1], dest)
@@ -1053,6 +1056,8 @@ proc genAddrDeref(c: PCtx; n: PNode; dest: var TDest; opc: TOpcode;
   # nkAddr we must not use 'unneededIndirection', but for deref we use it.
   if not isAddr and unneededIndirection(n.sons[0]):
     gen(c, n.sons[0], dest, newflags)
+  elif isAddr and isGlobal(n.sons[0]):
+    gen(c, n.sons[0], dest, flags+{gfAddrOf})
   else:
     let tmp = c.genx(n.sons[0], newflags)
     if dest < 0: dest = c.getTemp(n.typ)
@@ -1062,6 +1067,9 @@ proc genAddrDeref(c: PCtx; n: PNode; dest: var TDest; opc: TOpcode;
         c.gABC(n, opcNodeToReg, dest, dest)
     elif c.prc.slots[tmp].kind >= slotTempUnknown:
       gABC(c, n, opcAddrNode, dest, tmp)
+      # XXX this can still be wrong sometimes; hopefully it's only generated
+      # in call contexts, where it is safe
+      #message(n.info, warnUser, "suspicious opcode used")
     else:
       gABC(c, n, opcAddrReg, dest, tmp)
     c.freeTemp(tmp)
@@ -1127,6 +1135,9 @@ proc isTemp(c: PCtx; dest: TDest): bool =
 
 template needsAdditionalCopy(n): expr =
   not c.isTemp(dest) and not fitsRegister(n.typ)
+
+proc skipDeref(n: PNode): PNode =
+  result = if n.kind in {nkDerefExpr, nkHiddenDeref}: n.sons[0] else: n
 
 proc preventFalseAlias(c: PCtx; n: PNode; opc: TOpcode;
                        dest, idx, value: TRegister) =
@@ -1247,6 +1258,8 @@ proc genRdVar(c: PCtx; n: PNode; dest: var TDest; flags: TGenFlags) =
       c.gABx(n, opcLdGlobal, cc, s.position)
       c.gABC(n, opcNodeToReg, dest, cc)
       c.freeTemp(cc)
+    elif gfAddrOf in flags:
+      c.gABx(n, opcLdGlobalAddr, dest, s.position)
     else:
       c.gABx(n, opcLdGlobal, dest, s.position)
   else:
@@ -1489,6 +1502,26 @@ proc genTupleConstr(c: PCtx, n: PNode, dest: var TDest) =
 
 proc genProc*(c: PCtx; s: PSym): int
 
+proc matches(s: PSym; x: string): bool =
+  let y = x.split('.')
+  var s = s
+  var L = y.len-1
+  while L >= 0:
+    if s == nil or y[L].cmpIgnoreStyle(s.name.s) != 0: return false
+    s = s.owner
+    dec L
+  result = true
+
+proc procIsCallback(c: PCtx; s: PSym): bool =
+  if s.offset < -1: return true
+  var i = -2
+  for key, value in items(c.callbacks):
+    if s.matches(key): 
+      doAssert s.offset == -1
+      s.offset = i
+      return true
+    dec i
+
 proc gen(c: PCtx; n: PNode; dest: var TDest; flags: TGenFlags = {}) =
   case n.kind
   of nkSym:
@@ -1499,7 +1532,8 @@ proc gen(c: PCtx; n: PNode; dest: var TDest; flags: TGenFlags = {}) =
       genRdVar(c, n, dest, flags)
     of skProc, skConverter, skMacro, skTemplate, skMethod, skIterators:
       # 'skTemplate' is only allowed for 'getAst' support:
-      if sfImportc in s.flags: c.importcSym(n.info, s)
+      if procIsCallback(c, s): discard
+      elif sfImportc in s.flags: c.importcSym(n.info, s)
       genLit(c, n, dest)
     of skConst:
       gen(c, s.ast, dest)
@@ -1561,6 +1595,8 @@ proc gen(c: PCtx; n: PNode; dest: var TDest; flags: TGenFlags = {}) =
     let L = n.len-1
     for i in 0 .. <L: gen(c, n.sons[i])
     gen(c, n.sons[L], dest, flags)
+  of nkPragmaBlock:
+    gen(c, n.lastSon, dest, flags)
   of nkDiscardStmt:
     unused(n, dest)
     gen(c, n.sons[0])

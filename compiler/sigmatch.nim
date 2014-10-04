@@ -1,6 +1,6 @@
 #
 #
-#           The Nimrod Compiler
+#           The Nim Compiler
 #        (c) Copyright 2013 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -12,7 +12,8 @@
 
 import 
   intsets, ast, astalgo, semdata, types, msgs, renderer, lookups, semtypinst,
-  magicsys, condsyms, idents, lexer, options, parampatterns, strutils, trees
+  magicsys, condsyms, idents, lexer, options, parampatterns, strutils, trees,
+  pretty
 
 when not defined(noDocgen):
   import docgen
@@ -1272,6 +1273,7 @@ proc paramTypesMatch*(m: var TCandidate, f, a: PType,
     else: 
       # only one valid interpretation found:
       markUsed(arg.info, arg.sons[best].sym)
+      styleCheckUse(arg.info, arg.sons[best].sym)
       result = paramTypesMatchAux(m, f, arg.sons[best].typ, arg.sons[best],
                                   argOrig)
 
@@ -1319,7 +1321,7 @@ proc incrIndexType(t: PType) =
   inc t.sons[0].n.sons[1].intVal
 
 proc matchesAux(c: PContext, n, nOrig: PNode,
-                m: var TCandidate, marker: var TIntSet) = 
+                m: var TCandidate, marker: var IntSet) = 
   template checkConstraint(n: expr) {.immediate, dirty.} =
     if not formal.constraint.isNil:
       if matchNodeKinds(formal.constraint, n):
@@ -1480,7 +1482,22 @@ proc argtypeMatches*(c: PContext, f, a: PType): bool =
   # instantiate generic converters for that
   result = res != nil
 
+proc instDeepCopy*(c: PContext; dc: PSym; t: PType; info: TLineInfo): PSym {.
+                    procvar.} =
+  var m: TCandidate
+  initCandidate(c, m, dc.typ)
+  var f = dc.typ.sons[1]
+  if f.kind in {tyRef, tyPtr}: f = f.lastSon
+  if typeRel(m, f, t) == isNone:
+    localError(info, errGenerated, "cannot instantiate 'deepCopy'")
+  else:
+    result = c.semGenerateInstance(c, dc, m.bindings, info)
+    assert sfFromGeneric in result.flags
+
 include suggest
+
+when not declared(tests):
+  template tests(s: stmt) {.immediate.} = discard
 
 tests:
   var dummyOwner = newSym(skModule, getIdent("test_module"), nil, UnknownLineInfo())

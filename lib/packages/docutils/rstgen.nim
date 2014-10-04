@@ -1,6 +1,6 @@
 #
 #
-#            Nimrod's Runtime Library
+#            Nim's Runtime Library
 #        (c) Copyright 2012 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
@@ -35,16 +35,16 @@ type
     outHtml,            # output is HTML
     outLatex            # output is Latex
   
-  TTocEntry{.final.} = object 
+  TTocEntry = object 
     n*: PRstNode
     refname*, header*: string
 
   TMetaEnum* = enum 
     metaNone, metaTitle, metaSubtitle, metaAuthor, metaVersion
     
-  TRstGenerator* = object of TObject
+  TRstGenerator* = object of RootObj
     target*: TOutputTarget
-    config*: PStringTable
+    config*: StringTableRef
     splitAfter*: int          # split too long entries in the TOC
     tocPart*: seq[TTocEntry]
     hasToc*: bool
@@ -57,21 +57,21 @@ type
     currentSection: string ## \
     ## Stores the empty string or the last headline/overline found in the rst
     ## document, so it can be used as a prettier name for term index generation.
-    seenIndexTerms: TTable[string, int] ## \
+    seenIndexTerms: Table[string, int] ## \
     ## Keeps count of same text index terms to generate different identifiers
     ## for hyperlinks. See renderIndexTerm proc for details.
   
   PDoc = var TRstGenerator ## Alias to type less.
 
 proc initRstGenerator*(g: var TRstGenerator, target: TOutputTarget,
-                       config: PStringTable, filename: string,
+                       config: StringTableRef, filename: string,
                        options: TRstParseOptions,
                        findFile: TFindFileHandler,
                        msgHandler: TMsgHandler) =
   ## Initializes a ``TRstGenerator``.
   ##
   ## You need to call this before using a ``TRstGenerator`` with any other
-  ## procs in this module. Pass a non ``nil`` ``PStringTable`` value as
+  ## procs in this module. Pass a non ``nil`` ``StringTableRef`` value as
   ## `config` with parameters used by the HTML output generator.  If you don't
   ## know what to use, pass the results of the `defaultConfig()
   ## <#defaultConfig>_` proc.
@@ -103,7 +103,7 @@ proc initRstGenerator*(g: var TRstGenerator, target: TOutputTarget,
   ##
   ## Example:
   ##
-  ## .. code-block:: nimrod
+  ## .. code-block:: nim
   ##
   ##   import packages/docutils/rstgen
   ##
@@ -231,7 +231,7 @@ proc renderRstToOut*(d: var TRstGenerator, n: PRstNode, result: var string)
   ## ``initRstGenerator`` and parse a rst file with ``rstParse`` from the
   ## `packages/docutils/rst module <rst.html>`_. Example:
   ##
-  ## .. code-block:: nimrod
+  ## .. code-block:: nim
   ##
   ##   # ...configure gen and rst vars...
   ##   var generatedHTML = ""
@@ -341,13 +341,13 @@ proc renderIndexTerm*(d: PDoc, n: PRstNode, result: var string) =
         [id, term])
 
 type
-  TIndexEntry {.pure, final.} = object
+  TIndexEntry = object
     keyword: string
     link: string
     linkTitle: string ## If not nil, contains a prettier text for the href
     linkDesc: string ## If not nil, the title attribute of the final href
 
-  TIndexedDocs {.pure, final.} = TTable[TIndexEntry, seq[TIndexEntry]] ## \
+  TIndexedDocs = Table[TIndexEntry, seq[TIndexEntry]] ## \
     ## Contains the index sequences for doc types.
     ##
     ## The key is a *fake* TIndexEntry which will contain the title of the
@@ -597,7 +597,7 @@ proc mergeIndexes*(dir: string): string =
   ## Merges all index files in `dir` and returns the generated index as HTML.
   ##
   ## This proc will first scan `dir` for index files with the ``.idx``
-  ## extension previously created by commands like ``nimrod doc|rst2html``
+  ## extension previously created by commands like ``nim doc|rst2html``
   ## which use the ``--index:on`` switch. These index files are the result of
   ## calls to `setIndexTerm() <#setIndexTerm>`_ and `writeIndexFile()
   ## <#writeIndexFile>`_, so they are simple tab separated files.
@@ -768,7 +768,7 @@ proc renderCodeBlock(d: PDoc, n: PRstNode, result: var string) =
   var langstr = strip(getArgument(n))
   var lang: TSourceLanguage
   if langstr == "":
-    lang = langNimrod         # default language
+    lang = langNim         # default language
   else:
     lang = getSourceLanguage(langstr)
   
@@ -1011,7 +1011,7 @@ proc formatNamedVars*(frmt: string, varnames: openArray[string],
           inc(i)
           if i > L-1 or frmt[i] notin {'0'..'9'}: break 
         if j > high(varvalues) + 1:
-          raise newException(EInvalidValue, "invalid index: " & $j)
+          raise newException(ValueError, "invalid index: " & $j)
         num = j
         add(result, varvalues[j - 1])
       of 'A'..'Z', 'a'..'z', '\x80'..'\xFF': 
@@ -1024,13 +1024,13 @@ proc formatNamedVars*(frmt: string, varnames: openArray[string],
         if idx >= 0: 
           add(result, varvalues[idx])
         else:
-          raise newException(EInvalidValue, "unknown substitution var: " & id)
+          raise newException(ValueError, "unknown substitution var: " & id)
       of '{': 
         var id = ""
         inc(i)
         while frmt[i] != '}': 
           if frmt[i] == '\0': 
-            raise newException(EInvalidValue, "'}' expected")
+            raise newException(ValueError, "'}' expected")
           add(id, frmt[i])
           inc(i)
         inc(i)                # skip }
@@ -1038,9 +1038,9 @@ proc formatNamedVars*(frmt: string, varnames: openArray[string],
         var idx = getVarIdx(varnames, id)
         if idx >= 0: add(result, varvalues[idx])
         else: 
-          raise newException(EInvalidValue, "unknown substitution var: " & id)
+          raise newException(ValueError, "unknown substitution var: " & id)
       else:
-        raise newException(EInvalidValue, "unknown substitution: $" & $frmt[i])
+        raise newException(ValueError, "unknown substitution: $" & $frmt[i])
     var start = i
     while i < L: 
       if frmt[i] != '$': inc(i)
@@ -1048,10 +1048,10 @@ proc formatNamedVars*(frmt: string, varnames: openArray[string],
     if i-1 >= start: add(result, substr(frmt, start, i - 1))
 
 
-proc defaultConfig*(): PStringTable =
+proc defaultConfig*(): StringTableRef =
   ## Returns a default configuration for embedded HTML generation.
   ##
-  ## The returned ``PStringTable`` contains the paramters used by the HTML
+  ## The returned ``StringTableRef`` contains the paramters used by the HTML
   ## engine to build the final output. For information on what these parameters
   ## are and their purpose, please look up the file ``config/nimdoc.cfg``
   ## bundled with the compiler.
@@ -1113,7 +1113,7 @@ $content
 # ---------- forum ---------------------------------------------------------
 
 proc rstToHtml*(s: string, options: TRstParseOptions, 
-                config: PStringTable): string =
+                config: StringTableRef): string =
   ## Converts an input rst string into embeddable HTML.
   ##
   ## This convenience proc parses any input string using rst markup (it doesn't
@@ -1123,7 +1123,7 @@ proc rstToHtml*(s: string, options: TRstParseOptions,
   ## work. For an explanation of the ``config`` parameter see the
   ## ``initRstGenerator`` proc. Example:
   ##
-  ## .. code-block:: nimrod
+  ## .. code-block:: nim
   ##   import packages/docutils/rstgen, strtabs
   ##
   ##   echo rstToHtml("*Hello* **world**!", {},
