@@ -94,6 +94,9 @@ proc preSemGrip(c: PContext, n: PNode): PNode =
       echo "DECLARING VAR"
       debug result
       
+    of ord(wType):
+      echo "type"
+      result = emptyNode
     of ord(wIf):
       result = gripIf(c, n)
     of ord(wElse):
