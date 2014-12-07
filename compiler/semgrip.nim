@@ -57,10 +57,10 @@ proc preSemGrip(c: PContext, n: PNode): PNode =
   
   if n.kind == nkCall:
     case n.sons[0].ident.id
-    of ord(wDef):
+    of ord(wFn):
       var def = n.sons[2]
       def.sons[0] = n.sons[1]
-      var params = def[2]
+      var params = def[3]
       for i in 1.. <params.sons.len:
         let exp = params[i]
         if exp.kind == nkIdent:
@@ -76,7 +76,7 @@ proc preSemGrip(c: PContext, n: PNode): PNode =
         let
           lhs = n[1][0]
           rhs = n[2]
-          rhsAsConst = tryConst(c, rhs)
+          rhsAsConst = PNode nil # tryConst(c, rhs)
 
         if rhsAsConst != nil:
           result = newVarSection(lhs, rhsAsConst, true)
@@ -93,7 +93,9 @@ proc preSemGrip(c: PContext, n: PNode): PNode =
 
       echo "DECLARING VAR"
       debug result
-      
+
+    of ord(wGripComment):
+      result = emptyNode
     of ord(wType):
       echo "type"
       result = emptyNode
@@ -102,9 +104,15 @@ proc preSemGrip(c: PContext, n: PNode): PNode =
     of ord(wElse):
       result = buildIfFromElse(c, n)
     of ord(wFor):
-      echo "for"
+      let
+        set = n[1]
+        iter = n[2]
+        id = iter[paramsPos][1]
+      result = newNode(nkForStmt, n.info, @[id, set, iter[bodyPos]])
     of ord(wWhile):
-      echo "while"
+      let condition = n[1]
+      let body = n[2][bodyPos]
+      result = newNode(nkWhileStmt, n.info, @[condition, body])
     else:
       discard
   

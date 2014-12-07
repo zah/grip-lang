@@ -48,7 +48,7 @@ const
   IDStartChars = { 'a'..'z', 'A'..'Z' }
   IDChars = { 'a'..'z', 'A'..'Z', '0'..'9' }
   NumStartChars = { '0'..'9' }
-  NumChars = { '0'..'9', '.' }
+  NumChars = { '0'..'9' }
   StrStartChars = { '\'', '\"' }
   CharsWS = {' ', '\t'}
   OpChars = { ':', '=', '.', ';', ',', '~', '@', '#', '$', '\\',
@@ -102,6 +102,8 @@ proc getOp(id: PIdent): TOpData =
     ret(150, {Left, Infix, Prefix, Postfix})
   of "++", "--", "?", "!", "&", "@":
     ret(180, {Right, Infix, Prefix, Postfix})
+  of "..":
+    ret(185, {Left, Infix})
   of ":", "::":
     ret(190, {Left, Infix, Prefix})
   of ".":
@@ -220,7 +222,7 @@ proc sourceText(g: PGripFile, begins, ends: TPos): string =
   if begins >= ends: return ""
 
   if begins.line == ends.line:
-    return substr(g.lines[begins.line], begins.col, ends.col)
+    return substr(g.lines[begins.line], begins.col, ends.col - 1)
   else:
     result = substr(g.lines[begins.line], begins.col)
     result.add "\n"
@@ -229,7 +231,7 @@ proc sourceText(g: PGripFile, begins, ends: TPos): string =
       result.add(g.lines[line])
       result.add "\n"
 
-    result.add(substr(g.lines[ends.line], 0, ends.col))
+    result.add(substr(g.lines[ends.line], 0, ends.col - 1))
 
 proc lineinfo(g: PGripFile, p: TPos): TLineInfo =
   return newLineInfo(g.fileIdx, p.line, p.col)
@@ -353,8 +355,7 @@ proc scanOp(g: PGripFile): PNode =
     echo "PARSED COMMENT [", result.comment, "]"
 
 proc scanWhiteSpace(g: PGripFile): TWhiteSpace =
-  echo "starting whitespace scan at ", pos.line, ":", pos.col
-  echo "g.state ", g.lines.len
+  dbg "WHITESPCE SCAN"
   for c in eatCharsInLine(g):
     if c notin {' ', '\t'}: break
     if c == ' ': result.spaces += 1
@@ -467,6 +468,7 @@ proc firstCall(g: PGripFile, line: int): int =
   return g.lines.len
 
 proc parseBlock(g: PGripFile): PNode =
+  dbg "PARSE BLOCK"
   var
     line = firstCall(g, pos.line)
     indent = g.indents[line]
@@ -478,7 +480,7 @@ proc parseBlock(g: PGripFile): PNode =
   while true:
     callEnd = scanCall(g, line)
     let call = parseCall(g, line, callEnd)
-    echo indent, " BLOCK ELEM ", line
+    dbg "CALL PARSED"
     debug call
     result.addSon(call)
     if callEnd >= totalLines or g.indents[callEnd] < indent: break
@@ -605,10 +607,13 @@ proc parseWsAndOps(g: PGripFile, n: PNode): PNode =
 proc comment(n: PNode): PNode =
   return emptyNode
 
+proc makeLambda(info: TLineInfo, args, body: PNode): PNode =
+  result = newNode(nkLambda, info, @[emptyNode, emptyNode, emptyNode, args, emptyNode, emptyNode, body])
+
 proc primaryExpr(g: PGripFile): PNode =
   var start = pos
   let c = charAt(g)
-  echo "PRIMARY EXPR ", c
+  dbg "BEGIN PRIMARY"
   case c
   of IDStartChars:
     result = scanId(g)
@@ -659,7 +664,7 @@ proc primaryExpr(g: PGripFile): PNode =
       echo "trying nested block"
       body = parseNestedBlock(g)
 
-    result = newNode(nkLambda, lineinfo(g, start), @[emptyNode, emptyNode, args, emptyNode, body])
+    result = makeLambda(lineinfo(g, start), args, body)
 
   of '{':
     var parens = scanToEnd(g, '{', '}')
@@ -682,19 +687,22 @@ proc primaryExpr(g: PGripFile): PNode =
 proc parseExpr(g: PGripFile): PNode =
   dbg "PARSE EXPR"
 
+  let ln = g.cursor.line
   result = primaryExpr(g)
-  result = parseWsAndOps(g, result)
+  if ln == g.cursor.line:
+    result = parseWsAndOps(g, result)
 
   dbg "END PARSE EXPR"
 
 proc parseCall(g: PGripFile, s, e: int): PNode =
-  echo "START CALL ", s, ":", e
+  dbg "PARSE CALL"
   pos = newPos(int16(s), int16(0))
   var callChain: TShuntingYardStack
   clear(callChain)
 
   block ParseLine:
     while true:
+      let line = g.cursor.line
       g.breakCall = false
       let callee = parseExpr(g)
       var call = sexp(callee)
@@ -706,12 +714,14 @@ proc parseCall(g: PGripFile, s, e: int): PNode =
           var start = pos
           var body = parseNestedBlock(g)
           var args = newNode(nkFormalParams, lineinfo(g, start), @[emptyNode])
-          call.addSon newNode(nkLambda, lineinfo(g, start), @[emptyNode, emptyNode, args, emptyNode, body])
+          call.addSon makeLambda(lineinfo(g, start), args, body)
         else:
           break ParseLine
 
       while true:
-        echo "PARSE CALL STEP"
+        if g.cursor.line != line: break ParseLine
+
+        dbg "PARSE CALL STEP"
         if g.breakCall:
           echo "CALL BROKEN by ", g.pendingOp.id.ident.s
           callChain.processOp(g.pendingOp)
@@ -719,13 +729,13 @@ proc parseCall(g: PGripFile, s, e: int): PNode =
           break
 
         if isLineEnd(g):
-          echo "LINE AT END"
+          dbg "LINE AT END"
           if hasNestedBlock(g):
-            echo "NESTED BLOCK"
+            dbg "NESTED BLOCK"
             var start = pos
             var body = parseNestedBlock(g)
             var args = newNode(nkFormalParams, lineinfo(g, start), @[emptyNode])
-            call.addSon newNode(nkLambda, lineinfo(g, start), @[emptyNode, emptyNode, args, emptyNode, body])
+            call.addSon makeLambda(lineinfo(g, start), args, body)
             break ParseLine
           else:
             break ParseLine

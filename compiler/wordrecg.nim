@@ -39,6 +39,7 @@ type
 
     wDestroy,
     wDef, wFn,
+    wGripComment,
 
     wImmediate, wDestructor, wDelegator, wOverride,
     wImportCpp, wImportObjC,
@@ -123,6 +124,7 @@ const
 
     "destroy",
     "def", "fn",
+    ";;",
 
     "immediate", "destructor", "delegator", "override",
     "importcpp", "importobjc",
