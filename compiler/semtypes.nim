@@ -197,6 +197,8 @@ proc semRange(c: PContext, n: PNode, prev: PType): PType =
     if isRange(n[1]):
       result = semRangeAux(c, n[1], prev)
       let n = result.n
+      echo "SEM RANGE"
+      debug n
       if n.sons[0].kind in {nkCharLit..nkUInt64Lit} and n.sons[0].intVal > 0:
         incl(result.flags, tfNeedsInit)
       elif n.sons[1].kind in {nkCharLit..nkUInt64Lit} and n.sons[1].intVal < 0:
@@ -218,10 +220,14 @@ proc semArray(c: PContext, n: PNode, prev: PType): PType =
   var indx, base: PType
   result = newOrPrevType(tyArray, prev, c)
   if sonsLen(n) == 3: 
+    echo "SEM ARRAY"
+    debug n
     # 3 = length(array indx base)
     if isRange(n[1]): indx = semRangeAux(c, n[1], nil)
     else:
       let e = semExprWithType(c, n.sons[1], {efDetermineType})
+      echo "TRED"
+      debug e
       if e.typ.kind == tyFromExpr:
         indx = makeRangeWithStaticExpr(c, e.typ.n)
       elif e.kind in {nkIntLit..nkUInt64Lit}:

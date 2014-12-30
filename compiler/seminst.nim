@@ -21,7 +21,8 @@ proc instantiateGenericParamList(c: PContext, n: PNode, pt: TIdTable,
     var q = a.sym
     if q.typ.kind notin {tyTypeDesc, tyGenericParam, tyStatic, tyIter}+tyTypeClasses:
       continue
-    var s = newSym(skType, q.name, getCurrOwner(), q.info)
+    let symKind = if q.typ.kind == tyStatic: skGenericParam else: skType
+    var s = newSym(symKind, q.name, getCurrOwner(), q.info)
     s.flags = s.flags + {sfUsed, sfFromGeneric}
     var t = PType(idTableGet(pt, q.typ))
     if t == nil:
@@ -40,6 +41,10 @@ proc instantiateGenericParamList(c: PContext, n: PNode, pt: TIdTable,
       t = generateTypeInstance(c, pt, a, t)
       #t = ReplaceTypeVarsT(cl, t)
     s.typ = t
+    if nimdbg:
+      echo "ADDING GEN DECL ", s.id
+      debug s
+      debug s.typ
     addDecl(c, s)
     entry.concreteTypes[i] = t
 
@@ -102,6 +107,9 @@ proc instantiateBody(c: PContext, n: PNode, result: PSym) =
     inc c.inGenericInst
     # add it here, so that recursive generic procs are possible:
     var b = n.sons[bodyPos]
+    if nimdbg:
+      echo "BODY"
+      debug b
     var symMap: TIdTable
     initIdTable symMap
     freshGenSyms(b, result, symMap)

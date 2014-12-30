@@ -563,6 +563,8 @@ proc getTypeDescAux(m: BModule, typ: PType, check: var IntSet): PRope =
         result = toRope("TGenericSeq")
     app(result, "*")
   of tyArrayConstr, tyArray: 
+    echo "TYPE"
+    debug t
     n = lengthOrd(t)
     if n <= 0: 
       n = 1                   # make an array of at least one element

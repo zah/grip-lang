@@ -118,6 +118,12 @@ proc semSym(c: PContext, n: PNode, s: PSym, flags: TExprFlags): PNode =
     # var len = 0 # but won't be called
     # genericThatUsesLen(x) # marked as taking a closure?
   of skGenericParam:
+    if nimdbg:
+      echo "SK GEN{A}"
+      debug n
+      debug s.typ
+      debug s.typ.n
+
     styleCheckUse(n.info, s)
     if s.typ.kind == tyStatic:
       result = newSymNode(s, n.info)
@@ -128,6 +134,12 @@ proc semSym(c: PContext, n: PNode, s: PSym, flags: TExprFlags): PNode =
       n.typ = s.typ
       return n
   of skType:
+    if nimdbg:
+      echo "SKTYPE"
+      debug n
+      debug s.typ
+      debug s.typ.n
+
     markUsed(n.info, s)
     styleCheckUse(n.info, s)
     if s.typ.kind == tyStatic and s.typ.n != nil:
@@ -219,7 +231,7 @@ proc maybeLiftType(t: var PType, c: PContext, info: TLineInfo) =
   # gnrc. params, then it won't be necessary to open a new scope here
   openScope(c)
   var lifted = liftParamType(c, skType, newNodeI(nkArgList, info),
-                         t, ":anon", info)
+                             t, ":anon", info)
   closeScope(c)
   if lifted != nil: t = lifted
 
