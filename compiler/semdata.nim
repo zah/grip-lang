@@ -53,6 +53,10 @@ type
     attachedDeepCopy,
     attachedDestructor
 
+  GripTypeSectionContext* = ref object
+    typ*: PNode
+    prev*: GripTypeSectionContext
+
   PContext* = ref TContext
   TContext* = object of TPassContext # a context represents a module
     module*: PSym              # the module sym belonging to the context
@@ -68,6 +72,8 @@ type
     ambiguousSymbols*: IntSet  # ids of all ambiguous symbols (cannot
                                # store this info in the syms themselves!)
     inGripContext*: bool       # compling grip file
+    gripTypeSection*: GripTypeSectionContext # valid inside a grip type block
+    
     inTypeClass*: int          # > 0 if we are in a user-defined type class
     inGenericContext*: int     # > 0 if we are in a generic type
     inUnrolledContext*: int    # > 0 if we are unrolling a loop

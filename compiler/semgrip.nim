@@ -49,13 +49,62 @@ proc newVarSection(lhs, rhs: PNode, isConst: bool): PNode =
     newNode(defKind, lhs.info, @[lhs, emptyNode, rhs])
   ])
 
+proc expectIdent(n: PNode, idx: int): PIdent =
+  internalAssert idx < n.len
+  internalAssert n[idx].kind == nkIdent
+  return n[idx].ident
+
+proc expectKind(n: PNode, idx: int, kind: TNodeKind): PNode =
+  internalAssert idx < n.len and n[idx].kind == kind
+  return n[idx]
+
+proc gripTypeSection(c: PContext; name, body: PNode):
+  tuple[typedef: PNode, constructors: PNode] =
+  
+  var recList = newNode(nkRecList, name.info, @[])
+  var genericParams = emptyNode
+  var pragmas = emptyNode
+  var baseType = emptyNode
+
+  result.typedef =
+    newNode(nkTypeDef, name.info, @[
+      name,
+      genericParams,
+      newNode(nkObjectTy, body.info, @[
+        pragmas,
+        baseType,
+        recList])])
+
+  try:
+    c.gripTypeSection = GripTypeSectionContext(
+      prev: c.gripTypeSection,
+      typ: result.typedef)
+
+    discard openScope(c)
+    echo "BODY "
+    debug body[bodyPos]
+    body.sons[bodyPos] = preSemGrip(c, body[bodyPos])
+    var constructor = semProcAux(c, body, skProc, procPragmas)
+  
+  finally:
+    closeScope(c)
+    c.gripTypeSection = c.gripTypeSection.prev
+    
+proc inMainConstructor(c: PContext): bool =
+  return c.gripTypeSection != nil # TODO: check we are also not in a nested method
+
+proc isTypeField(n: PNode): bool =
+  return n.kind == nkDotExpr and n.len == 1
+
+proc fieldName(n: PNode): PNode =
+  return n[1]
+
 proc preSemGrip(c: PContext, n: PNode): PNode =
   result = n
-  
-  echo "ENTERING SEM GRIP"
-  debug n
-  
-  if n.kind == nkCall:
+ 
+  if n.kind == nkStmtList:
+    result = gripStmtList(c, n)
+  elif n.kind == nkCall:
     case n.sons[0].ident.id
     of ord(wFn):
       var def = n.sons[2]
@@ -70,54 +119,55 @@ proc preSemGrip(c: PContext, n: PNode): PNode =
   
       def.kind = nkProcDef
       result = def
+    
     of ord(wEquals):
       checkSonsLen n, 3
-      if n[1].kind == nkCall and n[1].sonsLen == 1 and n[1][0].kind == nkIdent:
-        let
-          lhs = n[1][0]
-          rhs = n[2]
-          rhsAsConst = PNode nil # tryConst(c, rhs)
-
-        if rhsAsConst != nil:
-          result = newVarSection(lhs, rhsAsConst, true)
-        else:
-          var existingVar = localSearchInScope(c, lhs.ident)
-          if existingVar != nil:
-            let varSym = semSym(c, lhs, existingVar, {})
-            result = newNode(nkAsgn, n.info, @[varSym, rhs])
-          else:
-            result = newVarSection(lhs, rhs, false)
-
-      else:
-        echo "BAD ASSIGNMENT"
-
-      echo "DECLARING VAR"
-      debug result
-
+      var
+        lhs = c.preSemGrip n[1]
+        rhs = c.preSemGrip n[2]
+      
+      if c.inMainConstructor and lhs.isTypeField:
+        let typedRhs = semExprWithType(c, rhs)
+        let fieldName = lhs.fieldName
+        lhs = newNode(nkDotExpr, lhs.info, @[newIdentNode(getIdent"result", lhs.info), fieldName])
+    
+      result = newNode(nkAsgn, n.info, @[lhs, rhs])
+ 
     of ord(wGripComment):
       result = emptyNode
+    
     of ord(wType):
-      echo "type"
-      result = emptyNode
+      let typeName = n.expectKind(1, nkIdent)
+      let body = n.expectKind(2, nkLambda)
+      
+      var typeSection = newNode(nkTypeSection, n.info)
+      
+      var typ = gripTypeSection(c, typeName, body)
+      typeSection.add typ.typedef
+      
+      result = semTypeSection(c, typeSection)
+
     of ord(wIf):
       result = gripIf(c, n)
+    
     of ord(wElse):
       result = buildIfFromElse(c, n)
+    
     of ord(wFor):
       let
         set = n[1]
         iter = n[2]
         id = iter[paramsPos][1]
       result = newNode(nkForStmt, n.info, @[id, set, iter[bodyPos]])
+    
     of ord(wWhile):
       let condition = n[1]
       let body = n[2][bodyPos]
       result = newNode(nkWhileStmt, n.info, @[condition, body])
+    
     else:
       discard
   
-  echo "EXITING SEM GRIP"
-  debug result
 
 proc semGrip*(c: PContext, n: PNode): PNode =
   result = preSemGrip(c, n)
