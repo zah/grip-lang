@@ -1,3 +1,12 @@
+#
+#
+#           The Nim Compiler
+#        (c) Copyright 2015 Andreas Rumpf
+#
+#    See the file "copying.txt", included in this
+#    distribution, for details about the copyright.
+#
+
 import renderer, strutils, ast, msgs, types, astalgo
 
 const defaultParamSeparator* = ","
@@ -26,7 +35,7 @@ proc renderPlainSymbolName*(n: PNode): string =
     result = renderPlainSymbolName(n[<n.len])
   else:
     internalError(n.info, "renderPlainSymbolName() with " & $n.kind)
-  assert (not result.isNil)
+  assert(not result.isNil)
 
 proc renderType(n: PNode): string =
   ## Returns a string with the node type or the empty string.
@@ -59,7 +68,6 @@ proc renderType(n: PNode): string =
       assert n[i].kind == nkIdent
       result.add(',' & typeStr)
   of nkTupleTy:
-    assert len(n) > 0
     result = "tuple["
     for i in 0 .. <len(n): result.add(renderType(n[i]) & ',')
     result[<len(result)] = ']'

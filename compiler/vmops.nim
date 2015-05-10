@@ -1,7 +1,7 @@
 #
 #
 #           The Nim Compiler
-#        (c) Copyright 2014 Andreas Rumpf
+#        (c) Copyright 2015 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
@@ -10,7 +10,7 @@
 # Unforunately this cannot be a module yet:
 #import vmdeps, vm
 from math import sqrt, ln, log10, log2, exp, round, arccos, arcsin,
-  arctan, arctan2, cos, cosh, hypot, sinh, sin, tan, tanh, pow, trunc, 
+  arctan, arctan2, cos, cosh, hypot, sinh, sin, tan, tanh, pow, trunc,
   floor, ceil, fmod
 
 from os import getEnv, existsEnv, dirExists, fileExists
@@ -44,6 +44,10 @@ template wrap2svoid(op) {.immediate, dirty.} =
     op(getString(a, 0), getString(a, 1))
   systemop op
 
+proc getCurrentExceptionMsgWrapper(a: VmArgs) {.nimcall.} =
+  setResult(a, if a.currentException.isNil: ""
+               else: a.currentException.sons[2].strVal)
+
 proc registerAdditionalOps*(c: PCtx) =
   wrap1f(sqrt)
   wrap1f(ln)
@@ -73,3 +77,4 @@ proc registerAdditionalOps*(c: PCtx) =
   wrap1s(dirExists)
   wrap1s(fileExists)
   wrap2svoid(writeFile)
+  systemop getCurrentExceptionMsg

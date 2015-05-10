@@ -70,17 +70,20 @@ const
   STDIN_FILENO* = 0  ## File number of stdin;
   STDOUT_FILENO* = 1 ## File number of stdout;
 
-when defined(endb):
-  # to not break bootstrapping again ...
-  type
-    TDIR* {.importc: "DIR", header: "<dirent.h>",
-            final, pure, incompleteStruct.} = object
-      ## A type representing a directory stream.
-else:
-  type
-    TDIR* {.importc: "DIR", header: "<dirent.h>",
-            final, pure.} = object
-      ## A type representing a directory stream.
+  DT_UNKNOWN* = 0 ## Unknown file type.
+  DT_FIFO* = 1    ## Named pipe, or FIFO.
+  DT_CHR* = 2     ## Character device.
+  DT_DIR* = 4     ## Directory.
+  DT_BLK* = 6     ## Block device.
+  DT_REG* = 8     ## Regular file.
+  DT_LNK* = 10    ## Symbolic link.
+  DT_SOCK* = 12   ## UNIX domain socket.
+  DT_WHT* = 14
+
+type
+  TDIR* {.importc: "DIR", header: "<dirent.h>",
+          incompleteStruct.} = object
+    ## A type representing a directory stream.
 
 type
   SocketHandle* = distinct cint # The type used to represent socket descriptors
@@ -91,6 +94,12 @@ type
   Tdirent* {.importc: "struct dirent",
              header: "<dirent.h>", final, pure.} = object ## dirent_t struct
     d_ino*: Tino  ## File serial number.
+    when defined(linux) or defined(macosx) or defined(bsd):
+      d_reclen*: cshort ## Length of this record. (not POSIX)
+      d_type*: int8 ## Type of file; not supported by all filesystem types.
+                    ## (not POSIX)
+      when defined(linux) or defined(bsd):
+        d_off*: TOff  ## Not an offset. Value that ``telldir()`` would return.
     d_name*: array [0..255, char] ## Name of entry.
 
   Tflock* {.importc: "struct flock", final, pure,
@@ -101,22 +110,6 @@ type
     l_len*: TOff      ## Size; if 0 then until EOF.
     l_pid*: TPid      ## Process ID of the process holding the lock;
                       ## returned with F_GETLK.
-
-  Tfenv* {.importc: "fenv_t", header: "<fenv.h>", final, pure.} =
-    object ## Represents the entire floating-point environment. The
-           ## floating-point environment refers collectively to any
-           ## floating-point status flags and control modes supported
-           ## by the implementation.
-  Tfexcept* {.importc: "fexcept_t", header: "<fenv.h>", final, pure.} =
-    object ## Represents the floating-point status flags collectively,
-           ## including any status the implementation associates with the
-           ## flags. A floating-point status flag is a system variable
-           ## whose value is set (but never cleared) when a floating-point
-           ## exception is raised, which occurs as a side effect of
-           ## exceptional floating-point arithmetic to provide auxiliary
-           ## information. A floating-point control mode is a system variable
-           ## whose value may be set by the user to affect the subsequent
-           ## behavior of floating-point arithmetic.
 
   TFTW* {.importc: "struct FTW", header: "<ftw.h>", final, pure.} = object
     base*: cint
@@ -842,18 +835,6 @@ var
     ## The application expects to access the specified data once and
     ## then not reuse it thereafter.
 
-  FE_DIVBYZERO* {.importc, header: "<fenv.h>".}: cint
-  FE_INEXACT* {.importc, header: "<fenv.h>".}: cint
-  FE_INVALID* {.importc, header: "<fenv.h>".}: cint
-  FE_OVERFLOW* {.importc, header: "<fenv.h>".}: cint
-  FE_UNDERFLOW* {.importc, header: "<fenv.h>".}: cint
-  FE_ALL_EXCEPT* {.importc, header: "<fenv.h>".}: cint
-  FE_DOWNWARD* {.importc, header: "<fenv.h>".}: cint
-  FE_TONEAREST* {.importc, header: "<fenv.h>".}: cint
-  FE_TOWARDZERO* {.importc, header: "<fenv.h>".}: cint
-  FE_UPWARD* {.importc, header: "<fenv.h>".}: cint
-  FE_DFL_ENV* {.importc, header: "<fenv.h>".}: cint
-
 when not defined(haiku) and not defined(OpenBSD):
   var
     MM_HARD* {.importc, header: "<fmtmsg.h>".}: cint
@@ -1433,14 +1414,6 @@ var
     ## Report status of stopped child process.
   WEXITSTATUS* {.importc, header: "<sys/wait.h>".}: cint
     ## Return exit status.
-  WIFCONTINUED* {.importc, header: "<sys/wait.h>".}: cint
-    ## True if child has been continued.
-  WIFEXITED* {.importc, header: "<sys/wait.h>".}: cint
-    ## True if child exited normally.
-  WIFSIGNALED* {.importc, header: "<sys/wait.h>".}: cint
-    ## True if child exited due to uncaught signal.
-  WIFSTOPPED* {.importc, header: "<sys/wait.h>".}: cint
-    ## True if child is currently stopped.
   WSTOPSIG* {.importc, header: "<sys/wait.h>".}: cint
     ## Return signal number that caused process to stop.
   WTERMSIG* {.importc, header: "<sys/wait.h>".}: cint
@@ -1587,6 +1560,14 @@ var
   MSG_OOB* {.importc, header: "<sys/socket.h>".}: cint
     ## Out-of-band data.
 
+proc WIFCONTINUED*(s:cint) : bool {.importc, header: "<sys/wait.h>".}
+  ## True if child has been continued.
+proc WIFEXITED*(s:cint) : bool {.importc, header: "<sys/wait.h>".}
+  ## True if child exited normally.
+proc WIFSIGNALED*(s:cint) : bool {.importc, header: "<sys/wait.h>".}
+  ## True if child exited due to uncaught signal.
+proc WIFSTOPPED*(s:cint) : bool {.importc, header: "<sys/wait.h>".}
+  ## True if child is currently stopped.
 
 when defined(linux):
   var
@@ -1598,9 +1579,12 @@ else:
 
 
 when defined(macosx):
+  # We can't use the NOSIGNAL flag in the ``send`` function, it has no effect
+  # Instead we should use SO_NOSIGPIPE in setsockopt
+  const
+    MSG_NOSIGNAL* = 0'i32
   var
-    MSG_HAVEMORE* {.importc, header: "<sys/socket.h>".}: cint
-    MSG_NOSIGNAL* = MSG_HAVEMORE
+    SO_NOSIGPIPE* {.importc, header: "<sys/socket.h>".}: cint
 else:
   var
     MSG_NOSIGNAL* {.importc, header: "<sys/socket.h>".}: cint
@@ -1767,7 +1751,10 @@ when hasSpawnH:
   when defined(linux):
     # better be safe than sorry; Linux has this flag, macosx doesn't, don't
     # know about the other OSes
-    var POSIX_SPAWN_USEVFORK* {.importc, header: "<spawn.h>".}: cint
+
+    # Non-GNU systems like TCC and musl-libc  don't define __USE_GNU, so we
+    # can't get the magic number from spawn.h
+    const POSIX_SPAWN_USEVFORK* = cint(0x40)
   else:
     # macosx lacks this, so we define the constant to be 0 to not affect
     # OR'ing of flags:
@@ -1828,20 +1815,6 @@ proc posix_fadvise*(a1: cint, a2, a3: TOff, a4: cint): cint {.
   importc, header: "<fcntl.h>".}
 proc posix_fallocate*(a1: cint, a2, a3: TOff): cint {.
   importc, header: "<fcntl.h>".}
-
-proc feclearexcept*(a1: cint): cint {.importc, header: "<fenv.h>".}
-proc fegetexceptflag*(a1: ptr Tfexcept, a2: cint): cint {.
-  importc, header: "<fenv.h>".}
-proc feraiseexcept*(a1: cint): cint {.importc, header: "<fenv.h>".}
-proc fesetexceptflag*(a1: ptr Tfexcept, a2: cint): cint {.
-  importc, header: "<fenv.h>".}
-proc fetestexcept*(a1: cint): cint {.importc, header: "<fenv.h>".}
-proc fegetround*(): cint {.importc, header: "<fenv.h>".}
-proc fesetround*(a1: cint): cint {.importc, header: "<fenv.h>".}
-proc fegetenv*(a1: ptr Tfenv): cint {.importc, header: "<fenv.h>".}
-proc feholdexcept*(a1: ptr Tfenv): cint {.importc, header: "<fenv.h>".}
-proc fesetenv*(a1: ptr Tfenv): cint {.importc, header: "<fenv.h>".}
-proc feupdateenv*(a1: ptr Tfenv): cint {.importc, header: "<fenv.h>".}
 
 when not defined(haiku) and not defined(OpenBSD):
   proc fmtmsg*(a1: int, a2: cstring, a3: cint,
@@ -2382,7 +2355,7 @@ proc hstrerror*(herrnum: cint): cstring {.importc, header: "<netdb.h>".}
 proc FD_CLR*(a1: cint, a2: var TFdSet) {.importc, header: "<sys/select.h>".}
 proc FD_ISSET*(a1: cint | SocketHandle, a2: var TFdSet): cint {.
   importc, header: "<sys/select.h>".}
-proc fdSet*(a1: cint | SocketHandle, a2: var TFdSet) {.
+proc FD_SET*(a1: cint | SocketHandle, a2: var TFdSet) {.
   importc: "FD_SET", header: "<sys/select.h>".}
 proc FD_ZERO*(a1: var TFdSet) {.importc, header: "<sys/select.h>".}
 

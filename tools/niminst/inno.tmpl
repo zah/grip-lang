@@ -1,5 +1,5 @@
 #! stdtmpl | standard
-#proc generateInnoSetup(c: TConfigData): string =
+#proc generateInnoSetup(c: ConfigData): string =
 #  result = ""
 ; Default Template for NimInst
 [Setup]
@@ -19,7 +19,7 @@ ChangesEnvironment=yes
 Name: english; MessagesFile: compiler:Default.isl
 
 [Files] 
-  #for i in low(TFileCategory)..fcWindows:
+  #for i in low(FileCategory)..fcWindows:
   #  for f in items(c.cat[i]):
 Source: ${expandFilename(f).toWin}; DestDir: {app}\${splitFile(f).dir.toWin}; Flags: ignoreversion
   #  end for
@@ -44,9 +44,9 @@ Name: modifypath; Description: &Add $c.displayName to your system path (if not i
 [Code]
 function GiveMeAPath(const DefaultPathName: string): string;
 begin
-  if IsAdminLoggedOn then Result := ExpandConstant('{pf}')
-  else Result := ExpandConstant('{userdocs}');
-  Result := Result + '\' + DefaultPathName;
+  if IsAdminLoggedOn then result := ExpandConstant('{pf}')
+  else result := ExpandConstant('{userdocs}');
+  result := result + '\' + DefaultPathName;
 end;
 
   #if c.binPaths.len > 0:

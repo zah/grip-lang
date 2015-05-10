@@ -1,7 +1,7 @@
 #
 #
 #            Nim's Runtime Library
-#        (c) Copyright 2014 Dominik Picheta
+#        (c) Copyright 2015 Dominik Picheta
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
@@ -38,6 +38,9 @@ export
   SO_ACCEPTCONN, SO_BROADCAST, SO_DEBUG, SO_DONTROUTE,
   SO_KEEPALIVE, SO_OOBINLINE, SO_REUSEADDR,
   MSG_PEEK
+
+when defined(macosx):
+    export SO_NOSIGPIPE
 
 type
   Port* = distinct uint16  ## port type
@@ -372,7 +375,7 @@ proc createFdSet(fd: var TFdSet, s: seq[SocketHandle], m: var int) =
   FD_ZERO(fd)
   for i in items(s): 
     m = max(m, int(i))
-    fdSet(i, fd)
+    FD_SET(i, fd)
    
 proc pruneSocketSet(s: var seq[SocketHandle], fd: var TFdSet) = 
   var i = 0

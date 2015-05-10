@@ -3,6 +3,13 @@ discard """
   output: "s\nd\nd\ns"
 """
 
+type
+  semistatic[T] =
+    static[T] or T
+
+template isStatic*(x): expr =
+  compiles(static(x))
+
 proc foo(x: semistatic[int]) =
   when isStatic(x):
     static: echo "static ", x

@@ -1,16 +1,18 @@
 #
 #
 #            Nim's Runtime Library
-#        (c) Copyright 2014 Dominik Picheta
+#        (c) Copyright 2015 Dominik Picheta
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
 #
 
-## Parses & constructs URLs.
+## **Warnings:** This module is deprecated since version 0.10.2.
+## Use the `uri <uri.html>`_ module instead.
 ##
-## **Note**: This module will be deprecated in the future and merged into a
-## new ``url`` module.
+## Parses & constructs URLs.
+
+{.deprecated.}
 
 import strutils
 

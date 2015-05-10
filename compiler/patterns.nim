@@ -260,7 +260,7 @@ proc applyRule*(c: PContext, s: PSym, n: PNode): PNode =
     # couldn't bind parameter:
     if isNil(x): return nil
     result.add(x)
-    if requiresAA: addToArgList(args, n)
+    if requiresAA: addToArgList(args, x)
   # perform alias analysis here:
   if requiresAA:
     for i in 1 .. < params.len:
@@ -275,7 +275,7 @@ proc applyRule*(c: PContext, s: PSym, n: PNode): PNode =
           if arg != rs and aliases.isPartOf(rs, arg) == arYes:
             ok = true
             break
-        # constraint not fullfilled:
+        # constraint not fulfilled:
         if not ok: return nil
       of aqNoAlias:
         # it MUST not alias with any other param:
@@ -284,7 +284,7 @@ proc applyRule*(c: PContext, s: PSym, n: PNode): PNode =
           if arg != rs and aliases.isPartOf(rs, arg) != arNo:
             ok = false
             break
-        # constraint not fullfilled:
+        # constraint not fulfilled:
         if not ok: return nil
 
   markUsed(n.info, s)

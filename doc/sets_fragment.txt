@@ -8,9 +8,9 @@ can also be used to include elements (and ranges of elements):
 
 .. code-block:: nim
   type
-    TCharSet = set[char]
+    CharSet = set[char]
   var
-    x: TCharSet
+    x: CharSet
   x = {'a'..'z', '0'..'9'} # This constructs a set that contains the
                            # letters from 'a' to 'z' and the digits
                            # from '0' to '9'
@@ -29,7 +29,6 @@ operation             meaning
 ``e in A``            set membership (A contains element e)
 ``e notin A``         A does not contain element e
 ``contains(A, e)``    A contains element e
-``A -+- B``           symmetric set difference (= (A - B) + (B - A))
 ``card(A)``           the cardinality of A (number of elements in A)
 ``incl(A, elem)``     same as ``A = A + {elem}``
 ``excl(A, elem)``     same as ``A = A - {elem}``

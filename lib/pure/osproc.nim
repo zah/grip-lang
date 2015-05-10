@@ -1,7 +1,7 @@
 #
 #
 #            Nim's Runtime Library
-#        (c) Copyright 2014 Andreas Rumpf
+#        (c) Copyright 2015 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
@@ -137,7 +137,7 @@ proc startProcess*(command: string,
   ## `env` is the environment that will be passed to the process.
   ## If ``env == nil`` the environment is inherited of
   ## the parent process. `options` are additional flags that may be passed
-  ## to `startProcess`. See the documentation of ``TProcessOption`` for the
+  ## to `startProcess`. See the documentation of ``ProcessOption`` for the
   ## meaning of these flags. You need to `close` the process when done.
   ##
   ## Note that you can't pass any `args` if you use the option
@@ -146,7 +146,7 @@ proc startProcess*(command: string,
   ## of `args` to `command` carefully escaping/quoting any special characters,
   ## since it will be passed *as is* to the system shell. Each system/shell may
   ## feature different escaping rules, so try to avoid this kind of shell
-  ## invokation if possible as it leads to non portable software.
+  ## invocation if possible as it leads to non portable software.
   ##
   ## Return value: The newly created process object. Nil is never returned,
   ## but ``EOS`` is raised in case of an error.
@@ -167,7 +167,13 @@ proc resume*(p: Process) {.rtl, extern: "nosp$1", tags: [].}
   ## Resumes the process `p`.
 
 proc terminate*(p: Process) {.rtl, extern: "nosp$1", tags: [].}
-  ## Terminates the process `p`.
+  ## Stop the process `p`. On Posix OSes the procedure sends ``SIGTERM``
+  ## to the process. On Windows the Win32 API function ``TerminateProcess()``
+  ## is called to stop the process.
+
+proc kill*(p: Process) {.rtl, extern: "nosp$1", tags: [].}
+  ## Kill the process `p`. On Posix OSes the procedure sends ``SIGKILL`` to
+  ## the process. On Windows ``kill()`` is simply an alias for ``terminate()``.
 
 proc running*(p: Process): bool {.rtl, extern: "nosp$1", tags: [].}
   ## Returns true iff the process `p` is still running. Returns immediately.
@@ -235,11 +241,13 @@ proc countProcessors*(): int {.rtl, extern: "nosp$1".} =
 
 proc execProcesses*(cmds: openArray[string],
                     options = {poStdErrToStdOut, poParentStreams},
-                    n = countProcessors()): int {.rtl, extern: "nosp$1",
-                    tags: [ExecIOEffect, TimeEffect, ReadEnvEffect]} =
+                    n = countProcessors(),
+                    beforeRunEvent: proc(idx: int) = nil): int
+                    {.rtl, extern: "nosp$1",
+                    tags: [ExecIOEffect, TimeEffect, ReadEnvEffect, RootEffect]} =
   ## executes the commands `cmds` in parallel. Creates `n` processes
   ## that execute in parallel. The highest return value of all processes
-  ## is returned.
+  ## is returned. Runs `beforeRunEvent` before running each command.
   when defined(posix):
     # poParentStreams causes problems on Posix, so we simply disable it:
     var options = options - {poParentStreams}
@@ -250,7 +258,9 @@ proc execProcesses*(cmds: openArray[string],
     newSeq(q, n)
     var m = min(n, cmds.len)
     for i in 0..m-1:
-      q[i] = startCmd(cmds[i], options=options)
+      if beforeRunEvent != nil:
+        beforeRunEvent(i)
+      q[i] = startProcess(cmds[i], options=options + {poEvalCommand})
     when defined(noBusyWaiting):
       var r = 0
       for i in m..high(cmds):
@@ -263,7 +273,9 @@ proc execProcesses*(cmds: openArray[string],
           echo(err)
         result = max(waitForExit(q[r]), result)
         if q[r] != nil: close(q[r])
-        q[r] = startCmd(cmds[i], options=options)
+        if beforeRunEvent != nil:
+          beforeRunEvent(i)
+        q[r] = startProcess(cmds[i], options=options + {poEvalCommand})
         r = (r + 1) mod n
     else:
       var i = m
@@ -274,7 +286,9 @@ proc execProcesses*(cmds: openArray[string],
             #echo(outputStream(q[r]).readLine())
             result = max(waitForExit(q[r]), result)
             if q[r] != nil: close(q[r])
-            q[r] = startCmd(cmds[i], options=options)
+            if beforeRunEvent != nil:
+              beforeRunEvent(i)
+            q[r] = startProcess(cmds[i], options=options + {poEvalCommand})
             inc(i)
             if i > high(cmds): break
     for j in 0..m-1:
@@ -282,7 +296,9 @@ proc execProcesses*(cmds: openArray[string],
       if q[j] != nil: close(q[j])
   else:
     for i in 0..high(cmds):
-      var p = startCmd(cmds[i], options=options)
+      if beforeRunEvent != nil:
+        beforeRunEvent(i)
+      var p = startProcess(cmds[i], options=options + {poEvalCommand})
       result = max(waitForExit(p), result)
       close(p)
 
@@ -479,6 +495,9 @@ when defined(Windows) and not defined(useNimRtl):
     if running(p):
       discard terminateProcess(p.fProcessHandle, 0)
 
+  proc kill(p: Process) =
+    terminate(p)
+
   proc waitForExit(p: Process, timeout: int = -1): int =
     discard waitForSingleObject(p.fProcessHandle, timeout.int32)
 
@@ -625,14 +644,14 @@ elif not defined(useNimRtl):
     var pid: TPid
 
     var sysArgs = allocCStringArray(sysArgsRaw)
-    finally: deallocCStringArray(sysArgs)
+    defer: deallocCStringArray(sysArgs)
 
     var sysEnv = if env == nil:
         envToCStringArray()
       else:
         envToCStringArray(env)
 
-    finally: deallocCStringArray(sysEnv)
+    defer: deallocCStringArray(sysEnv)
 
     var data: TStartProcessData
     data.sysCommand = sysCommand
@@ -647,7 +666,7 @@ elif not defined(useNimRtl):
     data.workingDir = workingDir
 
 
-    when declared(posix_spawn) and not defined(useFork) and 
+    when declared(posix_spawn) and not defined(useFork) and
         not defined(useClone) and not defined(linux):
       pid = startProcessAuxSpawn(data)
     else:
@@ -729,7 +748,7 @@ elif not defined(useNimRtl):
     if pipe(data.pErrorPipe) != 0:
       raiseOSError(osLastError())
 
-    finally:
+    defer:
       discard close(data.pErrorPipe[readIdx])
 
     var pid: TPid
@@ -803,7 +822,11 @@ elif not defined(useNimRtl):
         environ = data.sysEnv
         discard execvp(data.sysCommand, data.sysArgs)
       else:
-        discard execvpe(data.sysCommand, data.sysArgs, data.sysEnv)
+        when defined(uClibc):
+          # uClibc environment (OpenWrt included) doesn't have the full execvpe
+          discard execve(data.sysCommand, data.sysArgs, data.sysEnv)
+        else:
+          discard execvpe(data.sysCommand, data.sysArgs, data.sysEnv)
     else:
       discard execve(data.sysCommand, data.sysArgs, data.sysEnv)
 
@@ -819,21 +842,30 @@ elif not defined(useNimRtl):
     discard close(p.errHandle)
 
   proc suspend(p: Process) =
-    if kill(-p.id, SIGSTOP) != 0'i32: raiseOSError(osLastError())
+    if kill(p.id, SIGSTOP) != 0'i32: raiseOsError(osLastError())
 
   proc resume(p: Process) =
-    if kill(-p.id, SIGCONT) != 0'i32: raiseOSError(osLastError())
+    if kill(p.id, SIGCONT) != 0'i32: raiseOsError(osLastError())
 
   proc running(p: Process): bool =
-    var ret = waitpid(p.id, p.exitCode, WNOHANG)
+    var ret : int
+    when not defined(freebsd):
+      ret = waitpid(p.id, p.exitCode, WNOHANG)
+    else:
+      var status : cint = 1
+      ret = waitpid(p.id, status, WNOHANG)
+      if WIFEXITED(status):
+        p.exitCode = status
     if ret == 0: return true # Can't establish status. Assume running.
     result = ret == int(p.id)
 
   proc terminate(p: Process) =
-    if kill(-p.id, SIGTERM) == 0'i32:
-      if p.running():
-        if kill(-p.id, SIGKILL) != 0'i32: raiseOSError(osLastError())
-    else: raiseOSError(osLastError())
+    if kill(p.id, SIGTERM) != 0'i32:
+      raiseOsError(osLastError())
+
+  proc kill(p: Process) =
+    if kill(p.id, SIGKILL) != 0'i32:
+      raiseOsError(osLastError())
 
   proc waitForExit(p: Process, timeout: int = -1): int =
     #if waitPid(p.id, p.exitCode, 0) == int(p.id):
@@ -851,7 +883,7 @@ elif not defined(useNimRtl):
     var ret = waitpid(p.id, p.exitCode, WNOHANG)
     var b = ret == int(p.id)
     if b: result = -1
-    if p.exitCode == -3: result = -1
+    if not WIFEXITED(p.exitCode): result = -1
     else: result = p.exitCode.int shr 8
 
   proc createStream(stream: var Stream, handle: var FileHandle,
@@ -875,7 +907,8 @@ elif not defined(useNimRtl):
       createStream(p.errStream, p.errHandle, fmRead)
     return p.errStream
 
-  proc csystem(cmd: cstring): cint {.nodecl, importc: "system", header: "<stdlib.h>".}
+  proc csystem(cmd: cstring): cint {.nodecl, importc: "system",
+                                     header: "<stdlib.h>".}
 
   proc execCmd(command: string): int =
     when defined(linux):
@@ -887,7 +920,7 @@ elif not defined(useNimRtl):
     FD_ZERO(fd)
     for i in items(s):
       m = max(m, int(i.outHandle))
-      fdSet(cint(i.outHandle), fd)
+      FD_SET(cint(i.outHandle), fd)
 
   proc pruneProcessSet(s: var seq[Process], fd: var TFdSet) =
     var i = 0
@@ -923,7 +956,7 @@ proc execCmdEx*(command: string, options: set[ProcessOption] = {
                 exitCode: int] {.tags: [ExecIOEffect, ReadIOEffect], gcsafe.} =
   ## a convenience proc that runs the `command`, grabs all its output and
   ## exit code and returns both.
-  var p = startCmd(command, options)
+  var p = startProcess(command, options=options + {poEvalCommand})
   var outp = outputStream(p)
   result = (TaintedString"", -1)
   var line = newStringOfCap(120).TaintedString

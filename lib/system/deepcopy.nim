@@ -1,14 +1,14 @@
 #
 #
 #            Nim's Runtime Library
-#        (c) Copyright 2014 Andreas Rumpf
+#        (c) Copyright 2015 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
 #
 
-proc genericDeepCopyAux(dest, src: pointer, mt: PNimType) {.gcsafe.}
-proc genericDeepCopyAux(dest, src: pointer, n: ptr TNimNode) {.gcsafe.} =
+proc genericDeepCopyAux(dest, src: pointer, mt: PNimType) {.benign.}
+proc genericDeepCopyAux(dest, src: pointer, n: ptr TNimNode) {.benign.} =
   var
     d = cast[ByteAddress](dest)
     s = cast[ByteAddress](src)
@@ -34,9 +34,9 @@ proc genericDeepCopyAux(dest, src: pointer, n: ptr TNimNode) {.gcsafe.} =
 
 proc copyDeepString(src: NimString): NimString {.inline.} =
   if src != nil:
-    result = rawNewString(src.space)
+    result = rawNewStringNoInit(src.len)
     result.len = src.len
-    c_memcpy(result.data, src.data, (src.len + 1) * sizeof(char))
+    c_memcpy(result.data, src.data, src.len + 1)
 
 proc genericDeepCopyAux(dest, src: pointer, mt: PNimType) =
   var

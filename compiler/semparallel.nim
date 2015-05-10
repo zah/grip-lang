@@ -1,7 +1,7 @@
 #
 #
 #           The Nim Compiler
-#        (c) Copyright 2014 Andreas Rumpf
+#        (c) Copyright 2015 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
@@ -37,7 +37,7 @@ is valid, but
   spawn f(a[i])
   spawn f(a[i])
   inc i
-is not! However, 
+is not! However,
   spawn f(a[i])
   if guard: inc i
   spawn f(a[i])
@@ -258,14 +258,18 @@ proc min(a, b: PNode): PNode =
 
 proc fromSystem(op: PSym): bool = sfSystemModule in getModule(op).flags
 
+template pushSpawnId(c: expr, body: stmt) {.immediate, dirty.} =
+  inc c.spawns
+  let oldSpawnId = c.currentSpawnId
+  c.currentSpawnId = c.spawns
+  body
+  c.currentSpawnId = oldSpawnId
+
 proc analyseCall(c: var AnalysisCtx; n: PNode; op: PSym) =
   if op.magic == mSpawn:
-    inc c.spawns
-    let oldSpawnId = c.currentSpawnId
-    c.currentSpawnId = c.spawns
-    gatherArgs(c, n[1])
-    analyseSons(c, n)
-    c.currentSpawnId = oldSpawnId
+    pushSpawnId(c):
+      gatherArgs(c, n[1])
+      analyseSons(c, n)
   elif op.magic == mInc or (op.name.s == "+=" and op.fromSystem):
     if n[1].isLocal:
       let incr = n[2].skipConv
@@ -313,8 +317,9 @@ proc analyseIf(c: var AnalysisCtx; n: PNode) =
 proc analyse(c: var AnalysisCtx; n: PNode) =
   case n.kind
   of nkAsgn, nkFastAsgn:
-    if n[0].isSingleAssignable and n[1].isLocal:
-      let slot = c.getSlot(n[1].sym)
+    let y = n[1].skipConv
+    if n[0].isSingleAssignable and y.isLocal:
+      let slot = c.getSlot(y.sym)
       slot.alias = n[0].sym
     elif n[0].isLocal:
       # since we already ensure sfAddrTaken is not in s.flags, we only need to
@@ -322,8 +327,15 @@ proc analyse(c: var AnalysisCtx; n: PNode) =
       let slot = c.getSlot(n[0].sym)
       slot.blacklisted = true
     invalidateFacts(c.guards, n[0])
-    analyseSons(c, n)
-    addAsgnFact(c.guards, n[0], n[1])
+    let value = n[1]
+    if getMagic(value) == mSpawn:
+      pushSpawnId(c):
+        gatherArgs(c, value[1])
+        analyseSons(c, value[1])
+        analyse(c, n[0])
+    else:
+      analyseSons(c, n)
+    addAsgnFact(c.guards, n[0], y)
   of nkCallKinds:
     # direct call:
     if n[0].kind == nkSym: analyseCall(c, n, n[0].sym)
@@ -338,13 +350,18 @@ proc analyse(c: var AnalysisCtx; n: PNode) =
   of nkVarSection, nkLetSection:
     for it in n:
       let value = it.lastSon
+      let isSpawned = getMagic(value) == mSpawn
+      if isSpawned:
+        pushSpawnId(c):
+          gatherArgs(c, value[1])
+          analyseSons(c, value[1])
       if value.kind != nkEmpty:
         for j in 0 .. it.len-3:
           if it[j].isLocal:
             let slot = c.getSlot(it[j].sym)
             if slot.lower.isNil: slot.lower = value
             else: internalError(it.info, "slot already has a lower bound")
-        analyse(c, value)
+        if not isSpawned: analyse(c, value)
   of nkCaseStmt: analyseCase(c, n)
   of nkIfStmt, nkIfExpr: analyseIf(c, n)
   of nkWhileStmt:
@@ -444,7 +461,7 @@ proc liftParallel*(owner: PSym; n: PNode): PNode =
   # - detect used slices
   # - detect used arguments
   #echo "PAR ", renderTree(n)
-  
+
   var a = initAnalysisCtx()
   let body = n.lastSon
   analyse(a, body)

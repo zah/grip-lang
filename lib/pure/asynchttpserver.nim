@@ -1,7 +1,7 @@
 #
 #
 #            Nim's Runtime Library
-#        (c) Copyright 2014 Dominik Picheta
+#        (c) Copyright 2015 Dominik Picheta
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
@@ -17,34 +17,63 @@
 ## as the response body.
 ##
 ## .. code-block::nim
+##    import asynchttpserver, asyncdispatch
+##
 ##    var server = newAsyncHttpServer()
-##    proc cb(req: TRequest) {.async.} =
+##    proc cb(req: Request) {.async.} =
 ##      await req.respond(Http200, "Hello World")
 ##
-##    asyncCheck server.serve(Port(8080), cb)
-##    runForever()
+##    waitFor server.serve(Port(8080), cb)
 
 import strtabs, asyncnet, asyncdispatch, parseutils, uri, strutils
 type
   Request* = object
-    client*: PAsyncSocket # TODO: Separate this into a Response object?
+    client*: AsyncSocket # TODO: Separate this into a Response object?
     reqMethod*: string
-    headers*: PStringTable
+    headers*: StringTableRef
     protocol*: tuple[orig: string, major, minor: int]
-    url*: TUri
+    url*: Uri
     hostname*: string ## The hostname of the client that made the request.
     body*: string
 
   AsyncHttpServer* = ref object
-    socket: PAsyncSocket
+    socket: AsyncSocket
+    reuseAddr: bool
 
   HttpCode* = enum
+    Http100 = "100 Continue",
+    Http101 = "101 Switching Protocols",
     Http200 = "200 OK",
-    Http303 = "303 Moved",
+    Http201 = "201 Created",
+    Http202 = "202 Accepted",
+    Http204 = "204 No Content",
+    Http205 = "205 Reset Content",
+    Http206 = "206 Partial Content",
+    Http300 = "300 Multiple Choices",
+    Http301 = "301 Moved Permanently",
+    Http302 = "302 Found",
+    Http303 = "303 See Other",
+    Http304 = "304 Not Modified",
+    Http305 = "305 Use Proxy",
+    Http307 = "307 Temporary Redirect",
     Http400 = "400 Bad Request",
+    Http401 = "401 Unauthorized",
+    Http403 = "403 Forbidden",
     Http404 = "404 Not Found",
+    Http405 = "405 Method Not Allowed",
+    Http406 = "406 Not Acceptable",
+    Http407 = "407 Proxy Authentication Required",
+    Http408 = "408 Request Timeout",
+    Http409 = "409 Conflict",
+    Http410 = "410 Gone",
+    Http411 = "411 Length Required",
+    Http418 = "418 I'm a teapot",
     Http500 = "500 Internal Server Error",
-    Http502 = "502 Bad Gateway"
+    Http501 = "501 Not Implemented",
+    Http502 = "502 Bad Gateway",
+    Http503 = "503 Service Unavailable",
+    Http504 = "504 Gateway Timeout",
+    Http505 = "505 HTTP Version Not Supported"
 
   HttpVersion* = enum
     HttpVer11,
@@ -54,7 +83,7 @@ type
   THttpCode: HttpCode, THttpVersion: HttpVersion].}
 
 proc `==`*(protocol: tuple[orig: string, major, minor: int],
-           ver: THttpVersion): bool =
+           ver: HttpVersion): bool =
   let major =
     case ver
     of HttpVer11, HttpVer10: 1
@@ -64,34 +93,34 @@ proc `==`*(protocol: tuple[orig: string, major, minor: int],
     of HttpVer10: 0
   result = protocol.major == major and protocol.minor == minor
 
-proc newAsyncHttpServer*(): PAsyncHttpServer =
+proc newAsyncHttpServer*(reuseAddr = true): AsyncHttpServer =
   ## Creates a new ``AsyncHttpServer`` instance.
   new result
+  result.reuseAddr = reuseAddr
 
-proc addHeaders(msg: var string, headers: PStringTable) =
+proc addHeaders(msg: var string, headers: StringTableRef) =
   for k, v in headers:
     msg.add(k & ": " & v & "\c\L")
 
-proc sendHeaders*(req: TRequest, headers: PStringTable): Future[void] =
+proc sendHeaders*(req: Request, headers: StringTableRef): Future[void] =
   ## Sends the specified headers to the requesting client.
   var msg = ""
   addHeaders(msg, headers)
   return req.client.send(msg)
 
-proc respond*(req: TRequest, code: THttpCode,
-        content: string, headers: PStringTable = newStringTable()) {.async.} =
+proc respond*(req: Request, code: HttpCode, content: string,
+              headers: StringTableRef = nil): Future[void] =
   ## Responds to the request with the specified ``HttpCode``, headers and
   ## content.
   ##
   ## This procedure will **not** close the client socket.
-  var customHeaders = headers
-  customHeaders["Content-Length"] = $content.len
   var msg = "HTTP/1.1 " & $code & "\c\L"
-  msg.addHeaders(customHeaders)
-  await req.client.send(msg & "\c\L" & content)
 
-proc newRequest(): TRequest =
-  result.headers = newStringTable(modeCaseInsensitive)
+  if headers != nil:
+    msg.addHeaders(headers)
+  msg.add("Content-Length: " & $content.len & "\c\L\c\L")
+  msg.add(content)
+  result = req.client.send(msg)
 
 proc parseHeader(line: string): tuple[key, value: string] =
   var i = 0
@@ -103,72 +132,78 @@ proc parseHeader(line: string): tuple[key, value: string] =
 proc parseProtocol(protocol: string): tuple[orig: string, major, minor: int] =
   var i = protocol.skipIgnoreCase("HTTP/")
   if i != 5:
-    raise newException(EInvalidValue, "Invalid request protocol. Got: " &
+    raise newException(ValueError, "Invalid request protocol. Got: " &
         protocol)
   result.orig = protocol
   i.inc protocol.parseInt(result.major, i)
   i.inc # Skip .
   i.inc protocol.parseInt(result.minor, i)
 
-proc sendStatus(client: PAsyncSocket, status: string): Future[void] =
+proc sendStatus(client: AsyncSocket, status: string): Future[void] =
   client.send("HTTP/1.1 " & status & "\c\L")
 
-proc processClient(client: PAsyncSocket, address: string,
-                   callback: proc (request: TRequest):
+proc processClient(client: AsyncSocket, address: string,
+                   callback: proc (request: Request):
                       Future[void] {.closure, gcsafe.}) {.async.} =
-  while not client.closed:
+  var request: Request
+  request.url = initUri()
+  request.headers = newStringTable(modeCaseInsensitive)
+  var line = newStringOfCap(80)
+  var key, value = ""
+
+  while not client.isClosed:
     # GET /path HTTP/1.1
     # Header: val
     # \n
-    var request = newRequest()
-    request.hostname = address
+    request.headers.clear(modeCaseInsensitive)
+    request.hostname.shallowCopy(address)
     assert client != nil
     request.client = client
 
     # First line - GET /path HTTP/1.1
-    let line = await client.recvLine() # TODO: Timeouts.
+    line.setLen(0)
+    await client.recvLineInto(addr line) # TODO: Timeouts.
     if line == "":
       client.close()
       return
-    let lineParts = line.split(' ')
-    if lineParts.len != 3:
-      await request.respond(Http400, "Invalid request. Got: " & line)
-      continue
 
-    let reqMethod = lineParts[0]
-    let path = lineParts[1]
-    let protocol = lineParts[2]
+    var i = 0
+    for linePart in line.split(' '):
+      case i
+      of 0: request.reqMethod.shallowCopy(linePart.normalize)
+      of 1: parseUri(linePart, request.url)
+      of 2:
+        try:
+          request.protocol = parseProtocol(linePart)
+        except ValueError:
+          asyncCheck request.respond(Http400,
+            "Invalid request protocol. Got: " & linePart)
+          continue
+      else:
+        await request.respond(Http400, "Invalid request. Got: " & line)
+        continue
+      inc i
 
     # Headers
-    var i = 0
     while true:
       i = 0
-      let headerLine = await client.recvLine()
-      if headerLine == "":
+      line.setLen(0)
+      await client.recvLineInto(addr line)
+
+      if line == "":
         client.close(); return
-      if headerLine == "\c\L": break
-      # TODO: Compiler crash
-      #let (key, value) = parseHeader(headerLine)
-      let kv = parseHeader(headerLine)
-      request.headers[kv.key] = kv.value
+      if line == "\c\L": break
+      let (key, value) = parseHeader(line)
+      request.headers[key] = value
 
-    request.reqMethod = reqMethod
-    request.url = parseUri(path)
-    try:
-      request.protocol = protocol.parseProtocol()
-    except EInvalidValue:
-      asyncCheck request.respond(Http400, "Invalid request protocol. Got: " &
-          protocol)
-      continue
-
-    if reqMethod.normalize == "post":
+    if request.reqMethod == "post":
       # Check for Expect header
       if request.headers.hasKey("Expect"):
         if request.headers["Expect"].toLower == "100-continue":
           await client.sendStatus("100 Continue")
         else:
           await client.sendStatus("417 Expectation Failed")
-    
+
       # Read the body
       # - Check for Content-length header
       if request.headers.hasKey("Content-Length"):
@@ -182,11 +217,11 @@ proc processClient(client: PAsyncSocket, address: string,
         await request.respond(Http400, "Bad Request. No Content-Length.")
         continue
 
-    case reqMethod.normalize
+    case request.reqMethod
     of "get", "post", "head", "put", "delete", "trace", "options", "connect", "patch":
       await callback(request)
     else:
-      await request.respond(Http400, "Invalid request method. Got: " & reqMethod)
+      await request.respond(Http400, "Invalid request method. Got: " & request.reqMethod)
 
     # Persistent connections
     if (request.protocol == HttpVer11 and
@@ -202,17 +237,19 @@ proc processClient(client: PAsyncSocket, address: string,
       request.client.close()
       break
 
-proc serve*(server: PAsyncHttpServer, port: Port,
-            callback: proc (request: TRequest): Future[void] {.closure,gcsafe.},
+proc serve*(server: AsyncHttpServer, port: Port,
+            callback: proc (request: Request): Future[void] {.closure,gcsafe.},
             address = "") {.async.} =
   ## Starts the process of listening for incoming HTTP connections on the
   ## specified address and port.
   ##
   ## When a request is made by a client the specified callback will be called.
   server.socket = newAsyncSocket()
+  if server.reuseAddr:
+    server.socket.setSockOpt(OptReuseAddr, true)
   server.socket.bindAddr(port, address)
   server.socket.listen()
-  
+
   while true:
     # TODO: Causes compiler crash.
     #var (address, client) = await server.socket.acceptAddr()
@@ -221,14 +258,14 @@ proc serve*(server: PAsyncHttpServer, port: Port,
     #echo(f.isNil)
     #echo(f.repr)
 
-proc close*(server: PAsyncHttpServer) =
+proc close*(server: AsyncHttpServer) =
   ## Terminates the async http server instance.
   server.socket.close()
 
-when isMainModule:
+when not defined(testing) and isMainModule:
   proc main =
     var server = newAsyncHttpServer()
-    proc cb(req: TRequest) {.async.} =
+    proc cb(req: Request) {.async.} =
       #echo(req.reqMethod, " ", req.url)
       #echo(req.headers)
       let headers = {"Date": "Tue, 29 Apr 2014 23:40:08 GMT",

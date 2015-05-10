@@ -128,7 +128,7 @@ proc raiseOverflow {.exportc: "raiseOverflow", noreturn.} =
   raise newException(OverflowError, "over- or underflow")
 
 proc raiseDivByZero {.exportc: "raiseDivByZero", noreturn.} =
-  raise newException(DivByZeroError, "divison by zero")
+  raise newException(DivByZeroError, "division by zero")
 
 proc raiseRangeError() {.compilerproc, noreturn.} =
   raise newException(RangeError, "value out of range")
@@ -322,10 +322,10 @@ when defined(kwin):
       }
       print(buf);
     """
-    
+
 elif defined(nodejs):
   proc ewriteln(x: cstring) = log(x)
-  
+
   proc rawEcho {.compilerproc, asmNoStackFrame.} =
     asm """
       var buf = "";
@@ -339,17 +339,18 @@ else:
   var
     document {.importc, nodecl.}: ref TDocument
 
-  proc ewriteln(x: cstring) = 
+  proc ewriteln(x: cstring) =
     var node = document.getElementsByTagName("body")[0]
-    if node != nil: 
+    if node != nil:
       node.appendChild(document.createTextNode(x))
       node.appendChild(document.createElement("br"))
-    else: 
-      raise newException(EInvalidValue, "<body> element does not exist yet!")
+    else:
+      raise newException(ValueError, "<body> element does not exist yet!")
 
   proc rawEcho {.compilerproc.} =
     var node = document.getElementsByTagName("body")[0]
-    if node == nil: raise newException(EIO, "<body> element does not exist yet!")
+    if node == nil:
+      raise newException(IOError, "<body> element does not exist yet!")
     asm """
       for (var i = 0; i < arguments.length; ++i) {
         var x = `toJSStr`(arguments[i]);
@@ -562,7 +563,11 @@ proc nimCopy(x: pointer, ti: PNimType): pointer =
       }
     """
   of tyString:
-    asm "`result` = `x`.slice(0);"
+    asm """
+      if (`x` !== null) {
+        `result` = `x`.slice(0);
+      }
+    """
   else:
     result = x
 
@@ -678,7 +683,7 @@ proc nimParseBiggestFloat(s: string, number: var BiggestFloat, start = 0): int {
   if s[i] == 'I' or s[i] == 'i':
     if s[i+1] == 'N' or s[i+1] == 'n':
       if s[i+2] == 'F' or s[i+2] == 'f':
-        if s[i+3] notin IdentChars: 
+        if s[i+3] notin IdentChars:
           number = Inf*sign
           return i+3 - start
     return 0

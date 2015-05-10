@@ -67,7 +67,7 @@ special ``:`` syntax:
 .. code-block:: nim
 
   template withFile(f, fn, mode: expr, actions: stmt): stmt {.immediate.} =
-    var f: TFile
+    var f: File
     if open(f, fn, mode):
       try:
         actions
@@ -140,12 +140,12 @@ shadowed by the same argument name even when fully qualified:
   # module 'm'
 
   type
-    TLev = enum
+    Lev = enum
       levA, levB
 
   var abclev = levB
 
-  template tstLev(abclev: TLev) =
+  template tstLev(abclev: Lev) =
     echo abclev, " ", m.abclev
 
   tstLev(levA)
@@ -157,12 +157,12 @@ But the global symbol can properly be captured by a ``bind`` statement:
   # module 'm'
 
   type
-    TLev = enum
+    Lev = enum
       levA, levB
 
   var abclev = levB
 
-  template tstLev(abclev: TLev) =
+  template tstLev(abclev: Lev) =
     bind m.abclev
     echo abclev, " ", m.abclev
 
@@ -202,7 +202,7 @@ template parameter, it is an inject'ed symbol:
 .. code-block:: nim
   template withFile(f, fn, mode: expr, actions: stmt): stmt {.immediate.} =
     block:
-      var f: TFile  # since 'f' is a template param, it's injected implicitly
+      var f: File  # since 'f' is a template param, it's injected implicitly
       ...
       
   withFile(txt, "ttempl3.txt", fmWrite):
@@ -223,6 +223,38 @@ no semantics outside of a template definition and cannot be abstracted over:
 To get rid of hygiene in templates, one can use the `dirty`:idx: pragma for
 a template. ``inject`` and ``gensym`` have no effect in ``dirty`` templates.
 
+
+
+Limitations of the method call syntax
+-------------------------------------
+
+The expression ``x`` in ``x.f`` needs to be semantically checked (that means
+symbol lookup and type checking) before it can be decided that it needs to be
+rewritten to ``f(x)``. Therefore the dot syntax has some limiations when it
+is used to invoke templates/macros:
+
+.. code-block:: nim
+  template declareVar(name: expr): stmt =
+    const name {.inject.} = 45
+
+  # Doesn't compile:
+  unknownIdentifier.declareVar
+
+
+Another common example is this:
+
+.. code-block:: nim
+  from sequtils import toSeq
+
+  iterator something: string =
+    yield "Hello"
+    yield "World"
+
+  var info = toSeq(something())
+
+The problem here is that the compiler already decided that ``something()`` as
+an iterator is not callable in this context before ``toSeq`` gets its
+chance to convert it into a sequence.
 
 
 Macros

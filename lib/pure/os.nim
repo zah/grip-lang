@@ -1,7 +1,7 @@
 #
 #
 #            Nim's Runtime Library
-#        (c) Copyright 2014 Andreas Rumpf
+#        (c) Copyright 2015 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
@@ -185,7 +185,7 @@ const
 proc osErrorMsg*(): string {.rtl, extern: "nos$1", deprecated.} =
   ## Retrieves the operating system's error flag, ``errno``.
   ## On Windows ``GetLastError`` is checked before ``errno``.
-  ## Returns "" if no error occured.
+  ## Returns "" if no error occurred.
   ##
   ## **Deprecated since version 0.9.4**: use the other ``osErrorMsg`` proc.
 
@@ -211,13 +211,13 @@ proc osErrorMsg*(): string {.rtl, extern: "nos$1", deprecated.} =
 {.push warning[deprecated]: off.}
 proc raiseOSError*(msg: string = "") {.noinline, rtl, extern: "nos$1",
                                        deprecated.} =
-  ## raises an EOS exception with the given message ``msg``.
+  ## raises an OSError exception with the given message ``msg``.
   ## If ``msg == ""``, the operating system's error flag
   ## (``errno``) is converted to a readable error message. On Windows
   ## ``GetLastError`` is checked before ``errno``.
   ## If no error flag is set, the message ``unknown OS error`` is used.
   ##
-  ## **Deprecated since version 0.9.4**: use the other ``OSError`` proc.
+  ## **Deprecated since version 0.9.4**: use the other ``raiseOSError`` proc.
   if len(msg) == 0:
     var m = osErrorMsg()
     raise newException(OSError, if m.len > 0: m else: "unknown OS error")
@@ -234,7 +234,7 @@ proc `$`*(err: OSErrorCode): string {.borrow.}
 proc osErrorMsg*(errorCode: OSErrorCode): string =
   ## Converts an OS error code into a human readable string.
   ##
-  ## The error code can be retrieved using the ``OSLastError`` proc.
+  ## The error code can be retrieved using the ``osLastError`` proc.
   ##
   ## If conversion fails, or ``errorCode`` is ``0`` then ``""`` will be
   ## returned.
@@ -262,10 +262,10 @@ proc osErrorMsg*(errorCode: OSErrorCode): string =
       result = $os.strerror(errorCode.int32)
 
 proc raiseOSError*(errorCode: OSErrorCode) =
-  ## Raises an ``EOS`` exception. The ``errorCode`` will determine the
-  ## message, ``OSErrorMsg`` will be used to get this message.
+  ## Raises an ``OSError`` exception. The ``errorCode`` will determine the
+  ## message, ``osErrorMsg`` will be used to get this message.
   ##
-  ## The error code can be retrieved using the ``OSLastError`` proc.
+  ## The error code can be retrieved using the ``osLastError`` proc.
   ##
   ## If the error code is ``0`` or an error message could not be retrieved,
   ## the message ``unknown OS error`` will be used.
@@ -474,7 +474,11 @@ proc getCreationTime*(file: string): Time {.rtl, extern: "nos$1".} =
 proc fileNewer*(a, b: string): bool {.rtl, extern: "nos$1".} =
   ## Returns true if the file `a` is newer than file `b`, i.e. if `a`'s
   ## modification time is later than `b`'s.
-  result = getLastModificationTime(a) - getLastModificationTime(b) > 0
+  when defined(posix):
+    result = getLastModificationTime(a) - getLastModificationTime(b) >= 0
+    # Posix's resolution sucks so, we use '>=' for posix.
+  else:
+    result = getLastModificationTime(a) - getLastModificationTime(b) > 0
 
 proc getCurrentDir*(): string {.rtl, extern: "nos$1", tags: [].} =
   ## Returns the `current working directory`:idx:.
@@ -498,7 +502,7 @@ proc getCurrentDir*(): string {.rtl, extern: "nos$1", tags: [].} =
       raiseOSError(osLastError())
 
 proc setCurrentDir*(newDir: string) {.inline, tags: [].} =
-  ## Sets the `current working directory`:idx:; `EOS` is raised if
+  ## Sets the `current working directory`:idx:; `OSError` is raised if
   ## `newDir` cannot been set.
   when defined(Windows):
     when useWinUnicode:
@@ -571,7 +575,7 @@ proc `/` * (head, tail: string): string {.noSideEffect.} =
 proc splitPath*(path: string): tuple[head, tail: string] {.
   noSideEffect, rtl, extern: "nos$1".} =
   ## Splits a directory into (head, tail), so that
-  ## ``joinPath(head, tail) == path``.
+  ## ``head / tail == path`` (except for edge cases like "/usr").
   ##
   ## Examples:
   ##
@@ -595,7 +599,7 @@ proc splitPath*(path: string): tuple[head, tail: string] {.
 
 proc parentDirPos(path: string): int =
   var q = 1
-  if path[len(path)-1] in {DirSep, AltSep}: q = 2
+  if len(path) >= 1 and path[len(path)-1] in {DirSep, AltSep}: q = 2
   for i in countdown(len(path)-q, 0):
     if path[i] in {DirSep, AltSep}: return i
   result = -1
@@ -711,7 +715,7 @@ proc extractFilename*(path: string): string {.
 
 proc expandFilename*(filename: string): string {.rtl, extern: "nos$1",
   tags: [ReadDirEffect].} =
-  ## Returns the full path of `filename`, raises EOS in case of an error.
+  ## Returns the full path of `filename`, raises OSError in case of an error.
   when defined(windows):
     const bufsize = 3072'i32
     when useWinUnicode:
@@ -880,7 +884,7 @@ proc sameFileContent*(path1, path2: string): bool {.rtl, extern: "nos$1",
   close(b)
 
 type
-  TFilePermission* = enum  ## file access permission; modelled after UNIX
+  FilePermission* = enum   ## file access permission; modelled after UNIX
     fpUserExec,            ## execute access for the file owner
     fpUserWrite,           ## write access for the file owner
     fpUserRead,            ## read access for the file owner
@@ -891,7 +895,9 @@ type
     fpOthersWrite,         ## write access for others
     fpOthersRead           ## read access for others
 
-proc getFilePermissions*(filename: string): set[TFilePermission] {.
+{.deprecated: [TFilePermission: FilePermission].}
+
+proc getFilePermissions*(filename: string): set[FilePermission] {.
   rtl, extern: "nos$1", tags: [ReadDirEffect].} =
   ## retrieves file permissions for `filename`. `OSError` is raised in case of
   ## an error. On Windows, only the ``readonly`` flag is checked, every other
@@ -923,7 +929,7 @@ proc getFilePermissions*(filename: string): set[TFilePermission] {.
     else:
       result = {fpUserExec..fpOthersRead}
   
-proc setFilePermissions*(filename: string, permissions: set[TFilePermission]) {.
+proc setFilePermissions*(filename: string, permissions: set[FilePermission]) {.
   rtl, extern: "nos$1", tags: [WriteDirEffect].} =
   ## sets the file permissions for `filename`. `OSError` is raised in case of
   ## an error. On Windows, only the ``readonly`` flag is changed, depending on
@@ -963,7 +969,7 @@ proc copyFile*(source, dest: string) {.rtl, extern: "nos$1",
   tags: [ReadIOEffect, WriteIOEffect].} =
   ## Copies a file from `source` to `dest`.
   ##
-  ## If this fails, `EOS` is raised. On the Windows platform this proc will
+  ## If this fails, `OSError` is raised. On the Windows platform this proc will
   ## copy the source file's attributes into dest. On other platforms you need
   ## to use `getFilePermissions() <#getFilePermissions>`_ and
   ## `setFilePermissions() <#setFilePermissions>`_ to copy them by hand (or use
@@ -1003,9 +1009,17 @@ proc copyFile*(source, dest: string) {.rtl, extern: "nos$1",
 
 proc moveFile*(source, dest: string) {.rtl, extern: "nos$1",
   tags: [ReadIOEffect, WriteIOEffect].} =
-  ## Moves a file from `source` to `dest`. If this fails, `EOS` is raised.
-  if c_rename(source, dest) != 0'i32:
-    raise newException(OSError, $strerror(errno))
+  ## Moves a file from `source` to `dest`. If this fails, `OSError` is raised.
+  when defined(Windows):
+    when useWinUnicode:
+      let s = newWideCString(source)
+      let d = newWideCString(dest)
+      if moveFileW(s, d, 0'i32) == 0'i32: raiseOSError(osLastError())
+    else:
+      if moveFileA(source, dest, 0'i32) == 0'i32: raiseOSError(osLastError())
+  else:
+    if c_rename(source, dest) != 0'i32:
+      raise newException(OSError, $strerror(errno))
 
 when not declared(ENOENT) and not defined(Windows):
   when NoFakeVars:
@@ -1024,7 +1038,7 @@ when defined(Windows):
       setFileAttributesA(file, attrs)
 
 proc removeFile*(file: string) {.rtl, extern: "nos$1", tags: [WriteDirEffect].} =
-  ## Removes the `file`. If this fails, `EOS` is raised. This does not fail
+  ## Removes the `file`. If this fails, `OSError` is raised. This does not fail
   ## if the file never existed in the first place.
   ## On Windows, ignores the read-only attribute.
   when defined(Windows):
@@ -1068,8 +1082,12 @@ when defined(windows):
   # because we support Windows GUI applications, things get really
   # messy here...
   when useWinUnicode:
-    proc strEnd(cstr: WideCString, c = 0'i32): WideCString {.
-      importc: "wcschr", header: "<string.h>".}
+    when defined(cpp):
+      proc strEnd(cstr: WideCString, c = 0'i32): WideCString {.
+        importcpp: "(NI16*)wcschr((const wchar_t *)#, #)", header: "<string.h>".}
+    else:
+      proc strEnd(cstr: WideCString, c = 0'i32): WideCString {.
+        importc: "wcschr", header: "<string.h>".}
   else:
     proc strEnd(cstr: cstring, c = 0'i32): cstring {.
       importc: "strchr", header: "<string.h>".}
@@ -1081,7 +1099,7 @@ when defined(windows):
         var
           env = getEnvironmentStringsW()
           e = env
-        if e == nil: return # an error occured
+        if e == nil: return # an error occurred
         while true:
           var eend = strEnd(e)
           add(environment, $e)
@@ -1092,7 +1110,7 @@ when defined(windows):
         var
           env = getEnvironmentStringsA()
           e = env
-        if e == nil: return # an error occured
+        if e == nil: return # an error occurred
         while true:
           var eend = strEnd(e)
           add(environment, $e)
@@ -1103,8 +1121,8 @@ when defined(windows):
 
 else:
   const
-    useNSGetEnviron = defined(macosx) and
-      (defined(createNimRtl) or defined(useNimRtl))
+    useNSGetEnviron = defined(macosx)
+
   when useNSGetEnviron:
     # From the manual:
     # Shared libraries and bundles don't have direct access to environ,
@@ -1164,7 +1182,7 @@ proc putEnv*(key, val: string) {.tags: [WriteEnvEffect].} =
   ## If an error occurs, `EInvalidEnvVar` is raised.
 
   # Note: by storing the string in the environment sequence,
-  # we gurantee that we don't free the memory before the program
+  # we guarantee that we don't free the memory before the program
   # ends (this is needed for POSIX compliance). It is also needed so that
   # the process itself may access its modified environment variables!
   var indx = findEnvVar(key)
@@ -1227,13 +1245,15 @@ iterator walkFiles*(pattern: string): string {.tags: [ReadDirEffect].} =
     globfree(addr(f))
 
 type
-  TPathComponent* = enum  ## Enumeration specifying a path component.
+  PathComponent* = enum   ## Enumeration specifying a path component.
     pcFile,               ## path refers to a file
     pcLinkToFile,         ## path refers to a symbolic link to a file
     pcDir,                ## path refers to a directory
     pcLinkToDir           ## path refers to a symbolic link to a directory
 
-iterator walkDir*(dir: string): tuple[kind: TPathComponent, path: string] {.
+{.deprecated: [TPathComponent: PathComponent].}
+
+iterator walkDir*(dir: string): tuple[kind: PathComponent, path: string] {.
   tags: [ReadDirEffect].} =
   ## walks over the directory `dir` and yields for each directory or file in
   ## `dir`. The component type and full path for each item is returned.
@@ -1279,8 +1299,16 @@ iterator walkDir*(dir: string): tuple[kind: TPathComponent, path: string] {.
         if y != "." and y != "..":
           var s: TStat
           y = dir / y
-          if lstat(y, s) < 0'i32: break
           var k = pcFile
+
+          when defined(linux) or defined(macosx) or defined(bsd):
+            if x.d_type != DT_UNKNOWN:
+              if x.d_type == DT_DIR: k = pcDir
+              if x.d_type == DT_LNK: k = succ(k)
+              yield (k, y)
+              continue
+
+          if lstat(y, s) < 0'i32: break
           if S_ISDIR(s.st_mode): k = pcDir
           if S_ISLNK(s.st_mode): k = succ(k)
           yield (k, y)
@@ -1327,11 +1355,11 @@ proc rawRemoveDir(dir: string) =
     if rmdir(dir) != 0'i32 and errno != ENOENT: raiseOSError(osLastError())
 
 proc removeDir*(dir: string) {.rtl, extern: "nos$1", tags: [
-  WriteDirEffect, ReadDirEffect].} =
+  WriteDirEffect, ReadDirEffect], benign.} =
   ## Removes the directory `dir` including all subdirectories and files
   ## in `dir` (recursively).
   ##
-  ## If this fails, `EOS` is raised. This does not fail if the directory never
+  ## If this fails, `OSError` is raised. This does not fail if the directory never
   ## existed in the first place.
   for kind, path in walkDir(dir):
     case kind
@@ -1341,10 +1369,10 @@ proc removeDir*(dir: string) {.rtl, extern: "nos$1", tags: [
 
 proc rawCreateDir(dir: string) =
   when defined(solaris):
-    if mkdir(dir, 0o711) != 0'i32 and errno != EEXIST and errno != ENOSYS:
+    if mkdir(dir, 0o777) != 0'i32 and errno != EEXIST and errno != ENOSYS:
       raiseOSError(osLastError())
   elif defined(unix):
-    if mkdir(dir, 0o711) != 0'i32 and errno != EEXIST:
+    if mkdir(dir, 0o777) != 0'i32 and errno != EEXIST:
       raiseOSError(osLastError())
   else:
     when useWinUnicode:
@@ -1358,11 +1386,11 @@ proc createDir*(dir: string) {.rtl, extern: "nos$1", tags: [WriteDirEffect].} =
   ## Creates the `directory`:idx: `dir`.
   ##
   ## The directory may contain several subdirectories that do not exist yet.
-  ## The full path is created. If this fails, `EOS` is raised. It does **not**
+  ## The full path is created. If this fails, `OSError` is raised. It does **not**
   ## fail if the path already exists because for most usages this does not
   ## indicate an error.
   var omitNext = false
-  when defined(doslike):
+  when doslike:
     omitNext = isAbsolute(dir)
   for i in 1.. dir.len-1:
     if dir[i] in {DirSep, AltSep}:
@@ -1373,10 +1401,10 @@ proc createDir*(dir: string) {.rtl, extern: "nos$1", tags: [WriteDirEffect].} =
   rawCreateDir(dir)
 
 proc copyDir*(source, dest: string) {.rtl, extern: "nos$1",
-  tags: [WriteIOEffect, ReadIOEffect].} =
+  tags: [WriteIOEffect, ReadIOEffect], benign.} =
   ## Copies a directory from `source` to `dest`.
   ##
-  ## If this fails, `EOS` is raised. On the Windows platform this proc will
+  ## If this fails, `OSError` is raised. On the Windows platform this proc will
   ## copy the attributes from `source` into `dest`. On other platforms created
   ## files and directories will inherit the default permissions of a newly
   ## created file/directory for the user. To preserve attributes recursively on
@@ -1434,7 +1462,7 @@ proc createHardlink*(src, dest: string) =
 proc parseCmdLine*(c: string): seq[string] {.
   noSideEffect, rtl, extern: "nos$1".} =
   ## Splits a command line into several components;
-  ## This proc is only occassionally useful, better use the `parseopt` module.
+  ## This proc is only occasionally useful, better use the `parseopt` module.
   ##
   ## On Windows, it uses the following parsing rules
   ## (see http://msdn.microsoft.com/en-us/library/17w5ykft.aspx ):
@@ -1546,10 +1574,10 @@ proc copyFileWithPermissions*(source, dest: string,
 
 proc copyDirWithPermissions*(source, dest: string,
     ignorePermissionErrors = true) {.rtl, extern: "nos$1",
-    tags: [WriteIOEffect, ReadIOEffect].} =
+    tags: [WriteIOEffect, ReadIOEffect], benign.} =
   ## Copies a directory from `source` to `dest` preserving file permissions.
   ##
-  ## If this fails, `EOS` is raised. This is a wrapper proc around `copyDir()
+  ## If this fails, `OSError` is raised. This is a wrapper proc around `copyDir()
   ## <#copyDir>`_ and `copyFileWithPermissions() <#copyFileWithPermissions>`_
   ## on non Windows platforms. On Windows this proc is just a wrapper for
   ## `copyDir() <#copyDir>`_ since that proc already copies attributes.
@@ -1576,7 +1604,7 @@ proc copyDirWithPermissions*(source, dest: string,
     else: discard
 
 proc inclFilePermissions*(filename: string,
-                          permissions: set[TFilePermission]) {.
+                          permissions: set[FilePermission]) {.
   rtl, extern: "nos$1", tags: [ReadDirEffect, WriteDirEffect].} =
   ## a convenience procedure for:
   ##
@@ -1585,7 +1613,7 @@ proc inclFilePermissions*(filename: string,
   setFilePermissions(filename, getFilePermissions(filename)+permissions)
 
 proc exclFilePermissions*(filename: string,
-                          permissions: set[TFilePermission]) {.
+                          permissions: set[FilePermission]) {.
   rtl, extern: "nos$1", tags: [ReadDirEffect, WriteDirEffect].} =
   ## a convenience procedure for:
   ##
@@ -1821,7 +1849,7 @@ proc sleep*(milsecs: int) {.rtl, extern: "nos$1", tags: [TimeEffect].} =
 
 proc getFileSize*(file: string): BiggestInt {.rtl, extern: "nos$1",
   tags: [ReadIOEffect].} =
-  ## returns the file size of `file`. Can raise ``EOS``.
+  ## returns the file size of `file`. Can raise ``OSError``.
   when defined(windows):
     var a: TWIN32_FIND_DATA
     var resA = findFirstFile(file, a)
@@ -1835,16 +1863,21 @@ proc getFileSize*(file: string): BiggestInt {.rtl, extern: "nos$1",
       close(f)
     else: raiseOSError(osLastError())
 
+proc expandTilde*(path: string): string {.tags: [ReadEnvEffect].}
+
 proc findExe*(exe: string): string {.tags: [ReadDirEffect, ReadEnvEffect].} =
   ## Searches for `exe` in the current working directory and then
   ## in directories listed in the ``PATH`` environment variable.
   ## Returns "" if the `exe` cannot be found. On DOS-like platforms, `exe`
-  ## is added an ``.exe`` file extension if it has no extension.
+  ## is added the `ExeExt <#ExeExt>`_ file extension if it has none.
   result = addFileExt(exe, os.ExeExt)
   if existsFile(result): return
   var path = string(os.getEnv("PATH"))
   for candidate in split(path, PathSep):
-    var x = candidate / result
+    when defined(windows):
+      var x = candidate / result
+    else:
+      var x = expandTilde(candidate) / result
     if existsFile(x): return x
   result = ""
 
@@ -1881,9 +1914,9 @@ type
   FileInfo* = object
     ## Contains information associated with a file object.
     id*: tuple[device: DeviceId, file: FileId] # Device and file id.
-    kind*: TPathComponent # Kind of file object - directory, symlink, etc.
+    kind*: PathComponent # Kind of file object - directory, symlink, etc.
     size*: BiggestInt # Size of file.
-    permissions*: set[TFilePermission] # File permissions
+    permissions*: set[FilePermission] # File permissions
     linkCount*: BiggestInt # Number of hard links the file object has.
     lastAccessTime*: Time # Time file was last accessed.
     lastWriteTime*: Time # Time file was last modified/written to.
@@ -1969,6 +2002,8 @@ proc getFileInfo*(handle: FileHandle): FileInfo =
     rawToFormalFileInfo(rawInfo, result)
 
 proc getFileInfo*(file: File): FileInfo =
+  if file.isNil:
+    raise newException(IOError, "File is nil")
   result = getFileInfo(file.getFileHandle())
 
 proc getFileInfo*(path: string, followSymlink = true): FileInfo =

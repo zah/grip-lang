@@ -47,34 +47,88 @@ the rest of the procedure - that is not within a ``finally`` clause -
 is not executed (if an exception occurs).
 
 
-Except and finally statements
------------------------------
+Try expression
+--------------
 
-``except`` and ``finally`` can also be used as a stand-alone statements.
-Any statements following them in the current block will be considered to be 
-in an implicit try block:
+Try can also be used as an expression; the type of the ``try`` branch then
+needs to fit the types of ``except`` branches, but the type of the ``finally``
+branch always has to be ``void``:
+
+.. code-block:: nim
+  let x = try: parseInt("133a")
+          except: -1
+          finally: echo "hi"
+
+
+To prevent confusing code there is a parsing limitation; if the ``try``
+follows a ``(`` it has to be written as a one liner:
+
+.. code-block:: nim
+  let x = (try: parseInt("133a") except: -1)
+
+
+Except clauses
+--------------
+
+Within an ``except`` clause, it is possible to use
+``getCurrentException`` to retrieve the exception that has been
+raised:
+
+.. code-block:: nim
+  try:
+    # ...
+  except IOError:
+    let e = getCurrentException()
+    # Now use "e"
+
+Note that ``getCurrentException`` always returns a ``ref Exception``
+type. If a variable of the proper type is needed (in the example
+above, ``IOError``), one must convert it explicitly:
+
+.. code-block:: nim
+  try:
+    # ...
+  except IOError:
+    let e = (ref IOError)(getCurrentException())
+    # "e" is now of the proper type
+
+However, this is seldom needed. The most common case is to extract an
+error message from ``e``, and for such situations it is enough to use
+``getCurrentExceptionMsg``:
+
+.. code-block:: nim
+  try:
+    # ...
+  except IOError:
+    echo "I/O error: " & getCurrentExceptionMsg()
+
+
+Defer statement
+---------------
+
+Instead of a ``try finally`` statement a ``defer`` statement can be used.
+
+Any statements following the ``defer`` in the current block will be considered
+to be in an implicit try block:
 
 .. code-block:: nim
   var f = open("numbers.txt")
-  finally: close(f)
-  ...
+  defer: close(f)
+  f.write "abc"
+  f.write "def"
 
-The ``except`` statement has a limitation in this form: one can't specify the
-type of the exception, one has to catch everything. Also, if one wants to use
-both ``finally`` and ``except`` one needs to reverse the usual sequence of the
-statements. Example:
+Is rewritten to:
 
 .. code-block:: nim
-  proc test() =
-    raise newException(Exception, "Hey ho")
-  
-  proc tester() =
-    finally: echo "3. Finally block"
-    except: echo "2. Except block"
-    echo "1. Pre exception"
-    test()
-    echo "4. Post exception"
-  # --> 1, 2, 3 is printed, 4 is never reached
+  var f = open("numbers.txt")
+  try:
+    f.write "abc"
+    f.write "def"
+  finally:
+    close(f)
+
+Top level ``defer`` statements are not supported
+since it's unclear what such a statement should refer to.
 
 
 Raise statement
@@ -94,34 +148,6 @@ If no exception name is given, the current exception is `re-raised`:idx:. The
 `ReraiseError`:idx: exception is raised if there is no exception to
 re-raise. It follows that the ``raise`` statement *always* raises an
 exception (unless a raise hook has been provided).
-
-
-onRaise builtin
----------------
-
-`system.onRaise() <system.html#onRaise>`_ can be used to override the
-behaviour of ``raise`` for a single ``try`` statement. ``onRaise`` has to be
-called within the ``try`` statement that should be affected.
-
-This allows for a Lisp-like `condition system`:idx:\:
-
-.. code-block:: nim
-  var myFile = open("broken.txt", fmWrite)
-  try:
-    onRaise do (e: ref Exception)-> bool:
-      if e of IOError:
-        stdout.writeln "ok, writing to stdout instead"
-      else:
-        # do raise other exceptions:
-        result = true
-    myFile.writeln "writing to broken file"
-  finally:
-    myFile.close()
-
-``onRaise`` can only *filter* raised exceptions, it cannot transform one
-exception into another. (Nor should ``onRaise`` raise an exception though 
-this is currently not enforced.) This restriction keeps the exception tracking
-analysis sound.
 
 
 Exception hierarchy

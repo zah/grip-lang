@@ -7,15 +7,17 @@
 #    distribution, for details about the copyright.
 #
 
-# module for calling the different external C compilers
-# some things are read in from the configuration file
+# Module providing functions for calling the different external C compilers
+# Uses some hard-wired facts about each C/C++ compiler, plus options read
+# from a configuration file, to provide generalized procedures to compile
+# nim files.
 
 import
   lists, ropes, os, strutils, osproc, platform, condsyms, options, msgs, crc
 
-type 
-  TSystemCC* = enum 
-    ccNone, ccGcc, ccLLVM_Gcc, ccCLang, ccLcc, ccBcc, ccDmc, ccWcc, ccVcc, 
+type
+  TSystemCC* = enum
+    ccNone, ccGcc, ccLLVM_Gcc, ccCLang, ccLcc, ccBcc, ccDmc, ccWcc, ccVcc,
     ccTcc, ccPcc, ccUcc, ccIcl
   TInfoCCProp* = enum         # properties of the C compiler:
     hasSwitchRange,           # CC allows ranges in switch statements (GNU C)
@@ -24,8 +26,8 @@ type
     hasAssume,                # CC has __assume (Visual C extension)
     hasGcGuard,               # CC supports GC_GUARD to keep stack roots
     hasGnuAsm,                # CC's asm uses the absurd GNU assembler syntax
-    hasNakedDeclspec,         # CC has __declspec(naked)
-    hasNakedAttribute         # CC has __attribute__((naked))
+    hasDeclspec,              # CC has __declspec(X)
+    hasAttribute,             # CC has __attribute__((X))
   TInfoCCProps* = set[TInfoCCProp]
   TInfoCC* = tuple[
     name: string,        # the short name of the compiler
@@ -52,13 +54,14 @@ type
     props: TInfoCCProps] # properties of the C compiler
 
 
-# Configuration settings for various compilers. 
+# Configuration settings for various compilers.
 # When adding new compilers, the cmake sources could be a good reference:
 # http://cmake.org/gitweb?p=cmake.git;a=tree;f=Modules/Platform;
 
 template compiler(name: expr, settings: stmt): stmt {.immediate.} =
   proc name: TInfoCC {.compileTime.} = settings
 
+# GNU C and C++ Compiler
 compiler gcc:
   result = (
     name: "gcc",
@@ -82,23 +85,26 @@ compiler gcc:
     structStmtFmt: "$1 $3 $2 ", # struct|union [packed] $name
     packedPragma: "__attribute__((__packed__))",
     props: {hasSwitchRange, hasComputedGoto, hasCpp, hasGcGuard, hasGnuAsm,
-            hasNakedAttribute})
+            hasAttribute})
 
+# LLVM Frontend for GCC/G++
 compiler llvmGcc:
-  result = gcc()
-  
+  result = gcc() # Uses settings from GCC
+
   result.name = "llvm_gcc"
   result.compilerExe = "llvm-gcc"
   result.cppCompiler = "llvm-g++"
   result.buildLib = "llvm-ar rcs $libfile $objfiles"
 
+# Clang (LLVM) C/C++ Compiler
 compiler clang:
-  result = llvmGcc()
+  result = llvmGcc() # Uses settings from llvmGcc
 
   result.name = "clang"
   result.compilerExe = "clang"
   result.cppCompiler = "clang++"
 
+# Microsoft Visual C/C++ Compiler
 compiler vcc:
   result = (
     name: "vcc",
@@ -121,19 +127,21 @@ compiler vcc:
     asmStmtFrmt: "__asm{$n$1$n}$n",
     structStmtFmt: "$3$n$1 $2",
     packedPragma: "#pragma pack(1)",
-    props: {hasCpp, hasAssume, hasNakedDeclspec})
+    props: {hasCpp, hasAssume, hasDeclspec})
 
+# Intel C/C++ Compiler
 compiler icl:
   # Intel compilers try to imitate the native ones (gcc and msvc)
   when defined(windows):
     result = vcc()
   else:
     result = gcc()
-    
+
   result.name = "icl"
   result.compilerExe = "icl"
   result.linkerExe = "icl"
 
+# Local C Compiler
 compiler lcc:
   result = (
     name: "lcc",
@@ -158,6 +166,7 @@ compiler lcc:
     packedPragma: "", # XXX: not supported yet
     props: {})
 
+# Borland C Compiler
 compiler bcc:
   result = (
     name: "bcc",
@@ -182,6 +191,7 @@ compiler bcc:
     packedPragma: "", # XXX: not supported yet
     props: {hasCpp})
 
+# Digital Mars C Compiler
 compiler dmc:
   result = (
     name: "dmc",
@@ -206,6 +216,7 @@ compiler dmc:
     packedPragma: "#pragma pack(1)",
     props: {hasCpp})
 
+# Watcom C Compiler
 compiler wcc:
   result = (
     name: "wcc",
@@ -230,6 +241,7 @@ compiler wcc:
     packedPragma: "", # XXX: not supported yet
     props: {hasCpp})
 
+# Tiny C Compiler
 compiler tcc:
   result = (
     name: "tcc",
@@ -254,6 +266,7 @@ compiler tcc:
     packedPragma: "", # XXX: not supported yet
     props: {hasSwitchRange, hasComputedGoto})
 
+# Pelles C Compiler
 compiler pcc:
   # Pelles C
   result = (
@@ -279,6 +292,7 @@ compiler pcc:
     packedPragma: "", # XXX: not supported yet
     props: {})
 
+# Your C Compiler
 compiler ucc:
   result = (
     name: "ucc",
@@ -303,7 +317,7 @@ compiler ucc:
     packedPragma: "", # XXX: not supported yet
     props: {})
 
-const 
+const
   CC*: array[succ(low(TSystemCC))..high(TSystemCC), TInfoCC] = [
     gcc(),
     llvmGcc(),
@@ -318,7 +332,6 @@ const
     ucc(),
     icl()]
 
-const
   hExt* = ".h"
 
 var
@@ -333,66 +346,78 @@ var
 proc libNameTmpl(): string {.inline.} =
   result = if targetOS == osWindows: "$1.lib" else: "lib$1.a"
 
-var 
+var
   toLink, toCompile, externalToCompile: TLinkedList
   linkOptions: string = ""
   compileOptions: string = ""
   ccompilerpath: string = ""
 
-proc nameToCC*(name: string): TSystemCC = 
-  for i in countup(succ(ccNone), high(TSystemCC)): 
-    if cmpIgnoreStyle(name, CC[i].name) == 0: 
+proc nameToCC*(name: string): TSystemCC =
+  ## Returns the kind of compiler referred to by `name`, or ccNone
+  ## if the name doesn't refer to any known compiler.
+  for i in countup(succ(ccNone), high(TSystemCC)):
+    if cmpIgnoreStyle(name, CC[i].name) == 0:
       return i
   result = ccNone
 
 proc getConfigVar(c: TSystemCC, suffix: string): string =
   # use ``cpu.os.cc`` for cross compilation, unless ``--compileOnly`` is given
   # for niminst support
+  let fullSuffix =
+    if gCmd == cmdCompileToCpp:
+      ".cpp" & suffix
+    elif gCmd == cmdCompileToOC:
+      ".objc" & suffix
+    elif gCmd == cmdCompileToJS:
+      ".js" & suffix
+    else:
+      suffix
+
   if (platform.hostOS != targetOS or platform.hostCPU != targetCPU) and
       optCompileOnly notin gGlobalOptions:
-    let fullCCname = platform.CPU[targetCPU].name & '.' & 
-                     platform.OS[targetOS].name & '.' & 
-                     CC[c].name & suffix
+    let fullCCname = platform.CPU[targetCPU].name & '.' &
+                     platform.OS[targetOS].name & '.' &
+                     CC[c].name & fullSuffix
     result = getConfigVar(fullCCname)
     if result.len == 0:
       # not overriden for this cross compilation setting?
-      result = getConfigVar(CC[c].name & suffix)
+      result = getConfigVar(CC[c].name & fullSuffix)
   else:
-    result = getConfigVar(CC[c].name & suffix)
+    result = getConfigVar(CC[c].name & fullSuffix)
 
-proc setCC*(ccname: string) = 
+proc setCC*(ccname: string) =
   cCompiler = nameToCC(ccname)
   if cCompiler == ccNone: rawMessage(errUnknownCcompiler, ccname)
   compileOptions = getConfigVar(cCompiler, ".options.always")
-  linkOptions = getConfigVar(cCompiler, ".options.linker")
+  linkOptions = ""
   ccompilerpath = getConfigVar(cCompiler, ".path")
   for i in countup(low(CC), high(CC)): undefSymbol(CC[i].name)
   defineSymbol(CC[cCompiler].name)
 
-proc addOpt(dest: var string, src: string) = 
+proc addOpt(dest: var string, src: string) =
   if len(dest) == 0 or dest[len(dest)-1] != ' ': add(dest, " ")
   add(dest, src)
 
-proc addLinkOption*(option: string) = 
-  if find(linkOptions, option, 0) < 0: addOpt(linkOptions, option)
+proc addLinkOption*(option: string) =
+  addOpt(linkOptions, option)
 
-proc addCompileOption*(option: string) = 
-  if strutils.find(compileOptions, option, 0) < 0: 
+proc addCompileOption*(option: string) =
+  if strutils.find(compileOptions, option, 0) < 0:
     addOpt(compileOptions, option)
 
-proc initVars*() = 
+proc initVars*() =
   # we need to define the symbol here, because ``CC`` may have never been set!
   for i in countup(low(CC), high(CC)): undefSymbol(CC[i].name)
   defineSymbol(CC[cCompiler].name)
   addCompileOption(getConfigVar(cCompiler, ".options.always"))
-  addLinkOption(getConfigVar(cCompiler, ".options.linker"))
+  #addLinkOption(getConfigVar(cCompiler, ".options.linker"))
   if len(ccompilerpath) == 0:
     ccompilerpath = getConfigVar(cCompiler, ".path")
 
-proc completeCFilePath*(cfile: string, createSubDir: bool = true): string = 
+proc completeCFilePath*(cfile: string, createSubDir: bool = true): string =
   result = completeGeneratedFilePath(cfile, createSubDir)
 
-proc toObjFile*(filename: string): string = 
+proc toObjFile*(filename: string): string =
   # Object file for compilation
   result = changeFileExt(filename, CC[cCompiler].objExt)
 
@@ -412,26 +437,34 @@ proc addFileToLink*(filename: string) =
   prependStr(toLink, filename)
   # BUGFIX: was ``appendStr``
 
-proc execExternalProgram*(cmd: string) = 
-  if optListCmd in gGlobalOptions or gVerbosity > 0: msgWriteln(cmd)
-  if execCmd(cmd) != 0: rawMessage(errExecutionOfProgramFailed, "")
+proc execWithEcho(cmd: string, prettyCmd = ""): int =
+  if optListCmd in gGlobalOptions or gVerbosity > 0:
+    if prettyCmd != "":
+      msgWriteln(prettyCmd)
+    else:
+      msgWriteln(cmd)
+  result = execCmd(cmd)
 
-proc generateScript(projectFile: string, script: PRope) = 
+proc execExternalProgram*(cmd: string, prettyCmd = "") =
+  if execWithEcho(cmd, prettyCmd) != 0:
+    rawMessage(errExecutionOfProgramFailed, "")
+
+proc generateScript(projectFile: string, script: Rope) =
   let (dir, name, ext) = splitFile(projectFile)
-  writeRope(script, dir / addFileExt("compile_" & name, 
+  writeRope(script, dir / addFileExt("compile_" & name,
                                      platform.OS[targetOS].scriptExt))
 
-proc getOptSpeed(c: TSystemCC): string = 
+proc getOptSpeed(c: TSystemCC): string =
   result = getConfigVar(c, ".options.speed")
   if result == "":
     result = CC[c].optSpeed   # use default settings from this file
 
-proc getDebug(c: TSystemCC): string = 
+proc getDebug(c: TSystemCC): string =
   result = getConfigVar(c, ".options.debug")
   if result == "":
     result = CC[c].debug      # use default settings from this file
 
-proc getOptSize(c: TSystemCC): string = 
+proc getOptSize(c: TSystemCC): string =
   result = getConfigVar(c, ".options.size")
   if result == "":
     result = CC[c].optSize    # use default settings from this file
@@ -443,7 +476,7 @@ proc noAbsolutePaths: bool {.inline.} =
   # `optGenMapping` is included here for niminst.
   result = gGlobalOptions * {optGenScript, optGenMapping} != {}
 
-const 
+const
   specialFileA = 42
   specialFileB = 42
 
@@ -455,7 +488,7 @@ proc add(s: var string, many: openArray[string]) =
 proc cFileSpecificOptions(cfilename: string): string =
   result = compileOptions
   var trunk = splitFile(cfilename).name
-  if optCDebug in gGlobalOptions: 
+  if optCDebug in gGlobalOptions:
     var key = trunk & ".debug"
     if existsConfigVar(key): addOpt(result, getConfigVar(key))
     else: addOpt(result, getDebug(cCompiler))
@@ -482,7 +515,7 @@ proc getLinkOptions: string =
 
 proc needsExeExt(): bool {.inline.} =
   result = (optGenScript in gGlobalOptions and targetOS == osWindows) or
-                                       (platform.hostOS == osWindows)
+           (platform.hostOS == osWindows)
 
 proc getCompilerExe(compiler: TSystemCC): string =
   result = if gCmd == cmdCompileToCpp: CC[compiler].cppCompiler
@@ -495,17 +528,17 @@ proc getLinkerExe(compiler: TSystemCC): string =
            elif gMixedMode and gCmd != cmdCompileToCpp: CC[compiler].cppCompiler
            else: compiler.getCompilerExe
 
-proc getCompileCFileCmd*(cfilename: string, isExternal = false): string = 
+proc getCompileCFileCmd*(cfilename: string, isExternal = false): string =
   var c = cCompiler
   var options = cFileSpecificOptions(cfilename)
   var exe = getConfigVar(c, ".exe")
   if exe.len == 0: exe = c.getCompilerExe
-  
+
   if needsExeExt(): exe = addFileExt(exe, "exe")
   if optGenDynLib in gGlobalOptions and
       ospNeedsPIC in platform.OS[targetOS].props:
     add(options, ' ' & CC[c].pic)
-  
+
   var includeCmd, compilePattern: string
   if not noAbsolutePaths():
     # compute include paths:
@@ -518,7 +551,7 @@ proc getCompileCFileCmd*(cfilename: string, isExternal = false): string =
   else:
     includeCmd = ""
     compilePattern = c.getCompilerExe
-  
+
   var cfile = if noAbsolutePaths(): extractFilename(cfilename)
               else: cfilename
   var objfile = if not isExternal or noAbsolutePaths():
@@ -526,30 +559,35 @@ proc getCompileCFileCmd*(cfilename: string, isExternal = false): string =
                 else:
                   completeCFilePath(toObjFile(cfile))
   objfile = quoteShell(objfile)
+  cfile = quoteShell(cfile)
   result = quoteShell(compilePattern % [
     "file", cfile, "objfile", objfile, "options", options,
-    "include", includeCmd, "nimrod", getPrefixDir(),
+    "include", includeCmd, "nim", getPrefixDir(),
     "nim", getPrefixDir(), "lib", libpath])
   add(result, ' ')
   addf(result, CC[c].compileTmpl, [
     "file", cfile, "objfile", objfile,
     "options", options, "include", includeCmd,
-    "nimrod", quoteShell(getPrefixDir()),
+    "nim", quoteShell(getPrefixDir()),
     "nim", quoteShell(getPrefixDir()),
     "lib", quoteShell(libpath)])
 
 proc footprint(filename: string): TCrc32 =
+  # note, '><' further modifies a crc value with a string.
   result = crcFromFile(filename) ><
       platform.OS[targetOS].name ><
       platform.CPU[targetCPU].name ><
       extccomp.CC[extccomp.cCompiler].name ><
       getCompileCFileCmd(filename, true)
 
-proc externalFileChanged(filename: string): bool = 
+proc externalFileChanged(filename: string): bool =
+  if gCmd notin {cmdCompileToC, cmdCompileToCpp, cmdCompileToOC, cmdCompileToLLVM}:
+    return false
+
   var crcFile = toGeneratedFile(filename.withPackageName, "crc")
   var currentCrc = int(footprint(filename))
   var f: File
-  if open(f, crcFile, fmRead): 
+  if open(f, crcFile, fmRead):
     var line = newStringOfCap(40)
     if not f.readLine(line): line = "0"
     close(f)
@@ -557,7 +595,7 @@ proc externalFileChanged(filename: string): bool =
     result = oldCrc != currentCrc
   else:
     result = true
-  if result: 
+  if result:
     if open(f, crcFile, fmWrite):
       f.writeln($currentCrc)
       close(f)
@@ -566,41 +604,51 @@ proc addExternalFileToCompile*(filename: string) =
   if optForceFullMake in gGlobalOptions or externalFileChanged(filename):
     appendStr(externalToCompile, filename)
 
-proc compileCFile(list: TLinkedList, script: var PRope, cmds: var TStringSeq, 
-                  isExternal: bool) = 
+proc compileCFile(list: TLinkedList, script: var Rope, cmds: var TStringSeq,
+                  prettyCmds: var TStringSeq, isExternal: bool) =
   var it = PStrEntry(list.head)
-  while it != nil: 
+  while it != nil:
     inc(fileCounter)          # call the C compiler for the .c file:
     var compileCmd = getCompileCFileCmd(it.data, isExternal)
-    if optCompileOnly notin gGlobalOptions: 
+    if optCompileOnly notin gGlobalOptions:
       add(cmds, compileCmd)
-    if optGenScript in gGlobalOptions: 
-      app(script, compileCmd)
-      app(script, tnl)
+      let (dir, name, ext) = splitFile(it.data)
+      add(prettyCmds, "CC: " & name)
+    if optGenScript in gGlobalOptions:
+      add(script, compileCmd)
+      add(script, tnl)
     it = PStrEntry(it.next)
 
 proc callCCompiler*(projectfile: string) =
-  var 
+  var
     linkCmd, buildgui, builddll: string
-  if gGlobalOptions * {optCompileOnly, optGenScript} == {optCompileOnly}: 
+  if gGlobalOptions * {optCompileOnly, optGenScript} == {optCompileOnly}:
     return # speed up that call if only compiling and no script shall be
            # generated
   fileCounter = 0
   var c = cCompiler
-  var script: PRope = nil
+  var script: Rope = nil
   var cmds: TStringSeq = @[]
-  compileCFile(toCompile, script, cmds, false)
-  compileCFile(externalToCompile, script, cmds, true)
-  if optCompileOnly notin gGlobalOptions: 
+  var prettyCmds: TStringSeq = @[]
+  let prettyCb = proc (idx: int) =
+    echo prettyCmds[idx]
+  compileCFile(toCompile, script, cmds, prettyCmds, false)
+  compileCFile(externalToCompile, script, cmds, prettyCmds, true)
+  if optCompileOnly notin gGlobalOptions:
     if gNumberOfProcessors == 0: gNumberOfProcessors = countProcessors()
     var res = 0
-    if gNumberOfProcessors <= 1: 
-      for i in countup(0, high(cmds)): res = max(execCmd(cmds[i]), res)
-    elif optListCmd in gGlobalOptions or gVerbosity > 0: 
-      res = execProcesses(cmds, {poEchoCmd, poUseShell, poParentStreams}, 
+    if gNumberOfProcessors <= 1:
+      for i in countup(0, high(cmds)):
+        res = execWithEcho(cmds[i])
+        if res != 0: rawMessage(errExecutionOfProgramFailed, [])
+    elif optListCmd in gGlobalOptions or gVerbosity > 1:
+      res = execProcesses(cmds, {poEchoCmd, poUsePath, poParentStreams},
                           gNumberOfProcessors)
-    else: 
-      res = execProcesses(cmds, {poUseShell, poParentStreams}, 
+    elif gVerbosity == 1:
+      res = execProcesses(cmds, {poUsePath, poParentStreams},
+                          gNumberOfProcessors, prettyCb)
+    else:
+      res = execProcesses(cmds, {poUsePath, poParentStreams},
                           gNumberOfProcessors)
     if res != 0:
       if gNumberOfProcessors <= 1:
@@ -620,9 +668,9 @@ proc callCCompiler*(projectfile: string) =
       it = PStrEntry(it.next)
 
     if optGenStaticLib in gGlobalOptions:
-      linkCmd = CC[c].buildLib % ["libfile", (libNameTmpl() % gProjectName),
+      let name = splitFile(gProjectName).name
+      linkCmd = CC[c].buildLib % ["libfile", (libNameTmpl() % name),
                                   "objfiles", objfiles]
-      if optCompileOnly notin gGlobalOptions: execExternalProgram(linkCmd)
     else:
       var linkerExe = getConfigVar(c, ".linkerexe")
       if len(linkerExe) == 0: linkerExe = c.getLinkerExe
@@ -638,50 +686,55 @@ proc callCCompiler*(projectfile: string) =
       else:
         exefile = splitFile(projectfile).name & platform.OS[targetOS].exeExt
         builddll = ""
-      if options.outFile.len > 0: 
+      if options.outFile.len > 0:
         exefile = options.outFile.expandTilde
       if not noAbsolutePaths():
         if not exefile.isAbsolute():
           exefile = joinPath(splitFile(projectfile).dir, exefile)
       exefile = quoteShell(exefile)
-      let linkOptions = getLinkOptions()
+      let linkOptions = getLinkOptions() & " " &
+                        getConfigVar(cCompiler, ".options.linker")
       linkCmd = quoteShell(linkCmd % ["builddll", builddll,
           "buildgui", buildgui, "options", linkOptions, "objfiles", objfiles,
-          "exefile", exefile, "nimrod", getPrefixDir(), "lib", libpath])
+          "exefile", exefile, "nim", getPrefixDir(), "lib", libpath])
       linkCmd.add ' '
       addf(linkCmd, CC[c].linkTmpl, ["builddll", builddll,
           "buildgui", buildgui, "options", linkOptions,
           "objfiles", objfiles, "exefile", exefile,
-          "nimrod", quoteShell(getPrefixDir()),
+          "nim", quoteShell(getPrefixDir()),
           "lib", quoteShell(libpath)])
-      if optCompileOnly notin gGlobalOptions: execExternalProgram(linkCmd)
+    if optCompileOnly notin gGlobalOptions:
+      if gVerbosity == 1:
+        execExternalProgram(linkCmd, "[Linking]")
+      else:
+        execExternalProgram(linkCmd)
   else:
     linkCmd = ""
   if optGenScript in gGlobalOptions:
-    app(script, linkCmd)
-    app(script, tnl)
+    add(script, linkCmd)
+    add(script, tnl)
     generateScript(projectfile, script)
 
-proc genMappingFiles(list: TLinkedList): PRope = 
+proc genMappingFiles(list: TLinkedList): Rope =
   var it = PStrEntry(list.head)
-  while it != nil: 
-    appf(result, "--file:r\"$1\"$N", [toRope(it.data)])
+  while it != nil:
+    addf(result, "--file:r\"$1\"$N", [rope(it.data)])
     it = PStrEntry(it.next)
 
-proc writeMapping*(gSymbolMapping: PRope) = 
-  if optGenMapping notin gGlobalOptions: return 
-  var code = toRope("[C_Files]\n")
-  app(code, genMappingFiles(toCompile))
-  app(code, genMappingFiles(externalToCompile))
-  app(code, "\n[C_Compiler]\nFlags=")
-  app(code, strutils.escape(getCompileOptions()))
-  
-  app(code, "\n[Linker]\nFlags=")
-  app(code, strutils.escape(getLinkOptions()))
+proc writeMapping*(gSymbolMapping: Rope) =
+  if optGenMapping notin gGlobalOptions: return
+  var code = rope("[C_Files]\n")
+  add(code, genMappingFiles(toCompile))
+  add(code, genMappingFiles(externalToCompile))
+  add(code, "\n[C_Compiler]\nFlags=")
+  add(code, strutils.escape(getCompileOptions()))
 
-  app(code, "\n[Environment]\nlibpath=")
-  app(code, strutils.escape(libpath))
-  
-  appf(code, "\n[Symbols]$n$1", [gSymbolMapping])
+  add(code, "\n[Linker]\nFlags=")
+  add(code, strutils.escape(getLinkOptions() & " " &
+                            getConfigVar(cCompiler, ".options.linker")))
+
+  add(code, "\n[Environment]\nlibpath=")
+  add(code, strutils.escape(libpath))
+
+  addf(code, "\n[Symbols]$n$1", [gSymbolMapping])
   writeRope(code, joinPath(gProjectPath, "mapping.txt"))
-  

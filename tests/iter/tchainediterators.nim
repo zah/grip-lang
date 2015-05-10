@@ -6,13 +6,16 @@ discard """
 128
 192
 '''
+  disabled: "true"
 """
+
+# This all relies on non-documented and questionable features.
 
 iterator gaz(it: iterator{.inline.}): type(it) =
   for x in it:
     yield x*2
 
-iterator baz(it: iterator{.inline.}) =
+iterator baz(it: iterator{.inline.}): auto =
   for x in gaz(it):
     yield x*2
 
@@ -28,7 +31,7 @@ iterator foo[T](x: iterator: T{.inline.}): T =
 
 var s = @[1, 2, 3]
 
-# pass an interator several levels deep:
+# pass an iterator several levels deep:
 for x in s.items.foo:
   echo x
 

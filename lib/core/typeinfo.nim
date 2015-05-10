@@ -7,12 +7,17 @@
 #    distribution, for details about the copyright.
 #
 
-## This module implements an interface to Nimrod's runtime type information.
+## This module implements an interface to Nim's `runtime type information`:idx:
+## (`RTTI`:idx:).
 ## Note that even though ``TAny`` and its operations hide the nasty low level
 ## details from its clients, it remains inherently unsafe!
+##
+## See the `marshal <marshal.html>`_ module for what this module allows you
+## to do. 
 
 {.push hints: off.}
 
+include "system/inclrtl.nim"
 include "system/hti.nim"
 
 {.pop.}
@@ -50,7 +55,7 @@ type
     akUInt32 = 43,      ## any represents an unsigned int32
     akUInt64 = 44,      ## any represents an unsigned int64
     
-  TAny* = object {.pure.} ## can represent any nim value; NOTE: the wrapped
+  TAny* = object          ## can represent any nim value; NOTE: the wrapped
                           ## value can be modified with its wrapper! This means
                           ## that ``TAny`` keeps a non-traced pointer to its
                           ## wrapped value and **must not** live longer than
@@ -61,9 +66,9 @@ type
   ppointer = ptr pointer
   pbyteArray = ptr array[0.. 0xffff, int8]
 
-  TGenSeq {.pure.} = object
+  TGenericSeq {.importc.} = object
     len, space: int
-  PGenSeq = ptr TGenSeq
+  PGenSeq = ptr TGenericSeq
 
 const
   GenericSeqSize = (2 * sizeof(int))
@@ -264,9 +269,14 @@ iterator fields*(x: TAny): tuple[name: string, any: TAny] =
   # XXX BUG: does not work yet, however is questionable anyway
   when false:
     if x.rawType.kind == tyObject: t = cast[ptr PNimType](x.value)[]
-  var n = t.node
   var ret: seq[tuple[name: cstring, any: TAny]] = @[]
-  fieldsAux(p, n, ret)
+  if t.kind == tyObject:
+    while true:
+      fieldsAux(p, t.node, ret)
+      t = t.base
+      if t.isNil: break
+  else:
+    fieldsAux(p, t.node, ret)
   for name, any in items(ret):
     yield ($name, any)
 

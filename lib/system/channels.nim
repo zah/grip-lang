@@ -1,7 +1,7 @@
 #
 #
 #            Nim's Runtime Library
-#        (c) Copyright 2014 Andreas Rumpf
+#        (c) Copyright 2015 Andreas Rumpf
 #
 #    See the file "copying.txt", included in this
 #    distribution, for details about the copyright.
@@ -49,9 +49,9 @@ proc deinitRawChannel(p: pointer) =
   deinitSysCond(c.cond)
 
 proc storeAux(dest, src: pointer, mt: PNimType, t: PRawChannel, 
-              mode: TLoadStoreMode) {.gcsafe.}
+              mode: TLoadStoreMode) {.benign.}
 proc storeAux(dest, src: pointer, n: ptr TNimNode, t: PRawChannel,
-              mode: TLoadStoreMode) {.gcsafe.} =
+              mode: TLoadStoreMode) {.benign.} =
   var
     d = cast[ByteAddress](dest)
     s = cast[ByteAddress](src)
@@ -226,15 +226,17 @@ proc recv*[TMsg](c: var TChannel[TMsg]): TMsg =
   llRecv(q, addr(result), cast[PNimType](getTypeInfo(result)))
   releaseSys(q.lock)
 
-proc tryRecv*[TMsg](c: var TChannel[TMsg]): tuple[dataAvaliable: bool,
+proc tryRecv*[TMsg](c: var TChannel[TMsg]): tuple[dataAvailable: bool,
                                                   msg: TMsg] =
   ## try to receives a message from the channel `c` if available. Otherwise
   ## it returns ``(false, default(msg))``.
   var q = cast[PRawChannel](addr(c))
   if q.mask != ChannelDeadMask:
-    lockChannel(q):
-      llRecv(q, addr(result.msg), cast[PNimType](getTypeInfo(result.msg)))
-      result.dataAvaliable = true
+    if tryAcquireSys(q.lock):
+      if q.count > 0:
+        llRecv(q, addr(result.msg), cast[PNimType](getTypeInfo(result.msg)))
+        result.dataAvailable = true
+      releaseSys(q.lock)
 
 proc peek*[TMsg](c: var TChannel[TMsg]): int =
   ## returns the current number of messages in the channel `c`. Returns -1

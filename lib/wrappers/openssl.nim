@@ -41,14 +41,16 @@
 
 {.deadCodeElim: on.}
 
-when defined(WINDOWS): 
+const useWinVersion = defined(Windows) or defined(nimdoc)
+
+when useWinVersion: 
   const 
     DLLSSLName = "(ssleay32|libssl32).dll"
     DLLUtilName = "libeay32.dll"
   from winlean import SocketHandle
 else:
   const
-    versions = "(|.1.0.0|.0.9.9|.0.9.8|.0.9.7|.0.9.6|.0.9.5|.0.9.4)"
+    versions = "(.10|.1.0.1|.1.0.0|.0.9.9|.0.9.8)"
   when defined(macosx):
     const
       DLLSSLName = "libssl" & versions & ".dylib"
@@ -87,6 +89,8 @@ type
 {.deprecated: [PSSL: SslPtr, PSSL_CTX: SslCtx, PBIO: BIO].}
 
 const 
+  SSL_SENT_SHUTDOWN* = 1
+  SSL_RECEIVED_SHUTDOWN* = 2
   EVP_MAX_MD_SIZE* = 16 + 20
   SSL_ERROR_NONE* = 0
   SSL_ERROR_SSL* = 1
@@ -137,6 +141,14 @@ const
   SSL_CTRL_GET_MAX_CERT_LIST* = 50
   SSL_CTRL_SET_MAX_CERT_LIST* = 51 #* Allow SSL_write(..., n) to return r with 0 < r < n (i.e. report success
                                    # * when just a single record has been written): *
+  SSL_CTRL_SET_TLSEXT_SERVERNAME_CB = 53
+  SSL_CTRL_SET_TLSEXT_SERVERNAME_ARG = 54
+  SSL_CTRL_SET_TLSEXT_HOSTNAME = 55
+  TLSEXT_NAMETYPE_host_name* = 0
+  SSL_TLSEXT_ERR_OK* = 0
+  SSL_TLSEXT_ERR_ALERT_WARNING* = 1
+  SSL_TLSEXT_ERR_ALERT_FATAL* = 2
+  SSL_TLSEXT_ERR_NOACK* = 3
   SSL_MODE_ENABLE_PARTIAL_WRITE* = 1 #* Make it possible to retry SSL_write() with changed buffer location
                                      # * (buffer contents must stay the same!); this is not the default to avoid
                                      # * the misconception that non-blocking SSL_write() behaves like
@@ -231,6 +243,8 @@ proc SSL_CTX_check_private_key*(ctx: SslCtx): cInt{.cdecl, dynlib: DLLSSLName,
 proc SSL_set_fd*(ssl: SslPtr, fd: SocketHandle): cint{.cdecl, dynlib: DLLSSLName, importc.}
 
 proc SSL_shutdown*(ssl: SslPtr): cInt{.cdecl, dynlib: DLLSSLName, importc.}
+proc SSL_set_shutdown*(ssl: SslPtr, mode: cint) {.cdecl, dynlib: DLLSSLName, importc: "SSL_set_shutdown".}
+proc SSL_get_shutdown*(ssl: SslPtr): cint {.cdecl, dynlib: DLLSSLName, importc: "SSL_get_shutdown".}
 proc SSL_connect*(ssl: SslPtr): cint{.cdecl, dynlib: DLLSSLName, importc.}
 proc SSL_read*(ssl: SslPtr, buf: pointer, num: int): cint{.cdecl, dynlib: DLLSSLName, importc.}
 proc SSL_write*(ssl: SslPtr, buf: cstring, num: int): cint{.cdecl, dynlib: DLLSSLName, importc.}
@@ -270,19 +284,60 @@ proc OpenSSL_add_all_algorithms*(){.cdecl, dynlib: DLLUtilName, importc: "OPENSS
 
 proc OPENSSL_config*(configName: cstring){.cdecl, dynlib: DLLSSLName, importc.}
 
-when not defined(windows):
+when not useWinVersion:
   proc CRYPTO_set_mem_functions(a,b,c: pointer){.cdecl, 
     dynlib: DLLUtilName, importc.}
 
+  proc allocWrapper(size: int): pointer {.cdecl.} = alloc(size)
+  proc reallocWrapper(p: pointer; newsize: int): pointer {.cdecl.} =
+    if p == nil:
+      if newSize > 0: result = alloc(newsize)
+    elif newsize == 0: dealloc(p)
+    else: result = realloc(p, newsize)
+  proc deallocWrapper(p: pointer) {.cdecl.} =
+    if p != nil: dealloc(p)
+
 proc CRYPTO_malloc_init*() =
-  when not defined(windows):
-    CRYPTO_set_mem_functions(alloc, realloc, dealloc)
+  when not useWinVersion and not defined(macosx):
+    CRYPTO_set_mem_functions(allocWrapper, reallocWrapper, deallocWrapper)
 
 proc SSL_CTX_ctrl*(ctx: SslCtx, cmd: cInt, larg: int, parg: pointer): int{.
   cdecl, dynlib: DLLSSLName, importc.}
 
+proc SSL_CTX_callback_ctrl(ctx: SslCtx, typ: cInt, fp: PFunction): int{.
+  cdecl, dynlib: DLLSSLName, importc.}
+
 proc SSLCTXSetMode*(ctx: SslCtx, mode: int): int =
   result = SSL_CTX_ctrl(ctx, SSL_CTRL_MODE, mode, nil)
+
+proc SSL_ctrl*(ssl: SslPtr, cmd: cInt, larg: int, parg: pointer): int{.
+  cdecl, dynlib: DLLSSLName, importc.}
+
+proc SSL_set_tlsext_host_name*(ssl: SslPtr, name: cstring): int =
+  result = SSL_ctrl(ssl, SSL_CTRL_SET_TLSEXT_HOSTNAME, TLSEXT_NAMETYPE_host_name, name)
+  ## Set the SNI server name extension to be used in a client hello.
+  ## Returns 1 if SNI was set, 0 if current SSL configuration doesn't support SNI.
+
+
+proc SSL_get_servername*(ssl: SslPtr, typ: cInt = TLSEXT_NAMETYPE_host_name): cstring {.cdecl, dynlib: DLLSSLName, importc.}
+  ## Retrieve the server name requested in the client hello. This can be used
+  ## in the callback set in `SSL_CTX_set_tlsext_servername_callback` to
+  ## implement virtual hosting. May return `nil`.
+
+proc SSL_CTX_set_tlsext_servername_callback*(ctx: SslCtx, cb: proc(ssl: SslPtr, cb_id: int, arg: pointer): int {.cdecl.}): int =
+  ## Set the callback to be used on listening SSL connections when the client hello is received.
+  ##
+  ## The callback should return one of:
+  ## * SSL_TLSEXT_ERR_OK
+  ## * SSL_TLSEXT_ERR_ALERT_WARNING
+  ## * SSL_TLSEXT_ERR_ALERT_FATAL
+  ## * SSL_TLSEXT_ERR_NOACK
+  result = SSL_CTX_callback_ctrl(ctx, SSL_CTRL_SET_TLSEXT_SERVERNAME_CB, cast[PFunction](cb))
+
+proc SSL_CTX_set_tlsext_servername_arg*(ctx: SslCtx, arg: pointer): int =
+  ## Set the pointer to be used in the callback registered to ``SSL_CTX_set_tlsext_servername_callback``.
+  result = SSL_CTX_ctrl(ctx, SSL_CTRL_SET_TLSEXT_SERVERNAME_ARG, 0, arg)
+
 
 proc bioNew*(b: PBIO_METHOD): BIO{.cdecl, dynlib: DLLUtilName, importc: "BIO_new".}
 proc bioFreeAll*(b: BIO){.cdecl, dynlib: DLLUtilName, importc: "BIO_free_all".}
@@ -312,6 +367,11 @@ proc sslDoHandshake*(ssl: SslPtr): cint {.cdecl,
     dynlib: DLLSSLName, importc: "SSL_do_handshake".}
 
 
+
+proc ErrClearError*(){.cdecl, dynlib: DLLUtilName, importc: "ERR_clear_error".}
+proc ErrFreeStrings*(){.cdecl, dynlib: DLLUtilName, importc: "ERR_free_strings".}
+proc ErrRemoveState*(pid: cInt){.cdecl, dynlib: DLLUtilName, importc: "ERR_remove_state".}
+
 when true:
   discard
 else:
@@ -321,8 +381,6 @@ else:
       dynlib: DLLSSLName, importc.}
 
   proc SslSetFd*(s: PSSL, fd: cInt): cInt{.cdecl, dynlib: DLLSSLName, importc.}
-  proc SslCtrl*(ssl: PSSL, cmd: cInt, larg: int, parg: Pointer): int{.cdecl, 
-      dynlib: DLLSSLName, importc.}
   proc SslCTXCtrl*(ctx: PSSL_CTX, cmd: cInt, larg: int, parg: Pointer): int{.
       cdecl, dynlib: DLLSSLName, importc.}
 
@@ -412,9 +470,7 @@ else:
     #  function ErrErrorString(e: cInt; buf: PChar): PChar;
   proc SSLeayversion*(t: cInt): cstring{.cdecl, dynlib: DLLUtilName, importc.}
 
-  proc ErrClearError*(){.cdecl, dynlib: DLLUtilName, importc.}
-  proc ErrFreeStrings*(){.cdecl, dynlib: DLLUtilName, importc.}
-  proc ErrRemoveState*(pid: cInt){.cdecl, dynlib: DLLUtilName, importc.}
+
   proc OPENSSLaddallalgorithms*(){.cdecl, dynlib: DLLUtilName, importc.}
   proc CRYPTOcleanupAllExData*(){.cdecl, dynlib: DLLUtilName, importc.}
   proc RandScreen*(){.cdecl, dynlib: DLLUtilName, importc.}

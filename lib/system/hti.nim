@@ -11,7 +11,7 @@ when declared(NimString):
   # we are in system module:
   {.pragma: codegenType, compilerproc.}
 else:
-  {.pragma: codegenType.}
+  {.pragma: codegenType, importc.}
 
 type 
   # This should be he same as ast.TTypeKind
@@ -26,7 +26,7 @@ type
     tyExpr,
     tyStmt,
     tyTypeDesc,
-    tyGenericInvokation, # ``T[a, b]`` for types to invoke
+    tyGenericInvocation, # ``T[a, b]`` for types to invoke
     tyGenericBody,       # ``T[a, b, body]`` last parameter is the body
     tyGenericInst,       # ``T[a, b, realInstance]`` instantiated generic type
     tyGenericParam,      # ``a`` in the example
@@ -65,7 +65,7 @@ type
     tyBigNum,
 
   TNimNodeKind = enum nkNone, nkSlot, nkList, nkCase
-  TNimNode {.codegenType, final.} = object
+  TNimNode {.codegenType.} = object
     kind: TNimNodeKind
     offset: int
     typ: ptr TNimType
@@ -78,15 +78,15 @@ type
     ntfAcyclic = 1,    # type cannot form a cycle
     ntfEnumHole = 2    # enum has holes and thus `$` for them needs the slow
                        # version
-  TNimType {.codegenType, final.} = object
+  TNimType {.codegenType.} = object
     size: int
     kind: TNimKind
     flags: set[TNimTypeFlag]
     base: ptr TNimType
     node: ptr TNimNode # valid for tyRecord, tyObject, tyTuple, tyEnum
     finalizer: pointer # the finalizer for the type
-    marker: proc (p: pointer, op: int) {.nimcall, gcsafe.} # marker proc for GC
-    deepcopy: proc (p: pointer): pointer {.nimcall, gcsafe.}
+    marker: proc (p: pointer, op: int) {.nimcall, benign.} # marker proc for GC
+    deepcopy: proc (p: pointer): pointer {.nimcall, benign.}
   PNimType = ptr TNimType
   
 # node.len may be the ``first`` element of a set

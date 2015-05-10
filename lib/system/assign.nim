@@ -7,11 +7,11 @@
 #    distribution, for details about the copyright.
 #
 
-proc genericResetAux(dest: pointer, n: ptr TNimNode) {.gcsafe.}
+proc genericResetAux(dest: pointer, n: ptr TNimNode) {.benign.}
 
-proc genericAssignAux(dest, src: pointer, mt: PNimType, shallow: bool) {.gcsafe.}
+proc genericAssignAux(dest, src: pointer, mt: PNimType, shallow: bool) {.benign.}
 proc genericAssignAux(dest, src: pointer, n: ptr TNimNode,
-                      shallow: bool) {.gcsafe.} =
+                      shallow: bool) {.benign.} =
   var
     d = cast[ByteAddress](dest)
     s = cast[ByteAddress](src)
@@ -27,7 +27,7 @@ proc genericAssignAux(dest, src: pointer, n: ptr TNimNode,
     var m = selectBranch(src, n)
     # reset if different branches are in use; note different branches also
     # imply that's not self-assignment (``x = x``)!
-    if m != dd and dd != nil: 
+    if m != dd and dd != nil:
       genericResetAux(dest, dd)
     copyMem(cast[pointer](d +% n.offset), cast[pointer](s +% n.offset),
             n.typ.size)
@@ -70,13 +70,17 @@ proc genericAssignAux(dest, src: pointer, mt: PNimType, shallow: bool) =
                      GenericSeqSize),
         mt.base, shallow)
   of tyObject:
-    # we need to copy m_type field for tyObject, as it could be empty for
-    # sequence reallocations:
-    var pint = cast[ptr PNimType](dest)
-    pint[] = cast[ptr PNimType](src)[]
     if mt.base != nil:
       genericAssignAux(dest, src, mt.base, shallow)
     genericAssignAux(dest, src, mt.node, shallow)
+    # we need to copy m_type field for tyObject, as it could be empty for
+    # sequence reallocations:
+    var pint = cast[ptr PNimType](dest)
+    # We need to copy the *static* type not the dynamic type:
+    #   if p of TB:
+    #     var tbObj = TB(p)
+    #     tbObj of TC # needs to be false!
+    pint[] = mt # cast[ptr PNimType](src)[]
   of tyTuple:
     genericAssignAux(dest, src, mt.node, shallow)
   of tyArray, tyArrayConstr:
@@ -136,8 +140,8 @@ proc genericAssignOpenArray(dest, src: pointer, len: int,
     genericAssign(cast[pointer](d +% i*% mt.base.size),
                   cast[pointer](s +% i*% mt.base.size), mt.base)
 
-proc objectInit(dest: pointer, typ: PNimType) {.compilerProc, gcsafe.}
-proc objectInitAux(dest: pointer, n: ptr TNimNode) {.gcsafe.} =
+proc objectInit(dest: pointer, typ: PNimType) {.compilerProc, benign.}
+proc objectInitAux(dest: pointer, n: ptr TNimNode) {.benign.} =
   var d = cast[ByteAddress](dest)
   case n.kind
   of nkNone: sysAssert(false, "objectInitAux")
@@ -182,7 +186,7 @@ else:
     mixin destroy
     for i in countup(0, r.len - 1): destroy(r[i])
 
-proc genericReset(dest: pointer, mt: PNimType) {.compilerProc, gcsafe.}
+proc genericReset(dest: pointer, mt: PNimType) {.compilerProc, benign.}
 proc genericResetAux(dest: pointer, n: ptr TNimNode) =
   var d = cast[ByteAddress](dest)
   case n.kind
@@ -201,9 +205,13 @@ proc genericReset(dest: pointer, mt: PNimType) =
   case mt.kind
   of tyString, tyRef, tySequence:
     unsureAsgnRef(cast[PPointer](dest), nil)
-  of tyObject, tyTuple:
-    # we don't need to reset m_type field for tyObject
+  of tyTuple:
     genericResetAux(dest, mt.node)
+  of tyObject:
+    genericResetAux(dest, mt.node)
+    # also reset the type field for tyObject, for correct branch switching!
+    var pint = cast[ptr PNimType](dest)
+    pint[] = nil
   of tyArray, tyArrayConstr:
     for i in 0..(mt.size div mt.base.size)-1:
       genericReset(cast[pointer](d +% i*% mt.base.size), mt.base)

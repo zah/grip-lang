@@ -16,11 +16,11 @@ type
   TDbConn* = PMySQL    ## encapsulates a database connection
   TRow* = seq[string]  ## a row of a dataset. NULL database values will be
                        ## transformed always to the empty string.
-  EDb* = object of EIO ## exception that is raised if a database error occurs
+  EDb* = object of IOError ## exception that is raised if a database error occurs
 
   TSqlQuery* = distinct string ## an SQL query string
 
-  FDb* = object of FIO ## effect that denotes a database operation
+  FDb* = object of IOEffect ## effect that denotes a database operation
   FReadDb* = object of FDb   ## effect that denotes a read operation
   FWriteDb* = object of FDb  ## effect that denotes a write operation
 
@@ -57,7 +57,8 @@ when false:
       binding: seq[MYSQL_BIND]
     discard mysql_stmt_close(stmt)
 
-proc dbQuote(s: string): string =
+proc dbQuote*(s: string): string =
+  ## DB quotes the string.
   result = "'"
   for c in items(s):
     if c == '\'': add(result, "''")
@@ -69,7 +70,10 @@ proc dbFormat(formatstr: TSqlQuery, args: varargs[string]): string =
   var a = 0
   for c in items(string(formatstr)):
     if c == '?':
-      add(result, dbQuote(args[a]))
+      if args[a] == nil:
+        add(result, "NULL")
+      else:
+        add(result, dbQuote(args[a]))
       inc(a)
     else: 
       add(result, c)
@@ -115,7 +119,10 @@ iterator fastRows*(db: TDbConn, query: TSqlQuery,
       if row == nil: break
       for i in 0..L-1: 
         setLen(result[i], 0)
-        add(result[i], row[i])
+        if row[i] == nil:
+          result[i] = nil
+        else:
+          add(result[i], row[i])
       yield result
     properFreeResult(sqlres, row)
 
@@ -132,7 +139,10 @@ proc getRow*(db: TDbConn, query: TSqlQuery,
     if row != nil: 
       for i in 0..L-1: 
         setLen(result[i], 0)
-        add(result[i], row[i])
+        if row[i] == nil:
+          result[i] = nil
+        else:
+          add(result[i], row[i])
     properFreeResult(sqlres, row)
 
 proc getAllRows*(db: TDbConn, query: TSqlQuery, 
@@ -150,7 +160,11 @@ proc getAllRows*(db: TDbConn, query: TSqlQuery,
       if row == nil: break
       setLen(result, j+1)
       newSeq(result[j], L)
-      for i in 0..L-1: result[j][i] = $row[i]
+      for i in 0..L-1:
+        if row[i] == nil:
+          result[j][i] = nil
+        else:
+          result[j][i] = $row[i]
       inc(j)
     mysql.freeResult(sqlres)
 
@@ -206,13 +220,18 @@ proc open*(connection, user, password, database: string): TDbConn {.
   if result == nil: dbError("could not open database connection") 
   let
     colonPos = connection.find(':')
-    host =        if colonPos < 0: connection
-                  else:            substr(connection, 0, colonPos-1)
+    host = if colonPos < 0: connection
+           else: substr(connection, 0, colonPos-1)
     port: int32 = if colonPos < 0: 0'i32
-                  else:            substr(connection, colonPos+1).parseInt.int32
+                  else: substr(connection, colonPos+1).parseInt.int32
   if mysql.realConnect(result, host, user, password, database, 
                        port, nil, 0) == nil:
     var errmsg = $mysql.error(result)
     db_mysql.close(result)
     dbError(errmsg)
 
+proc setEncoding*(connection: TDbConn, encoding: string): bool {.
+  tags: [FDb].} =
+  ## sets the encoding of a database connection, returns true for 
+  ## success, false for failure.
+  result = mysql.set_character_set(connection, encoding) == 0

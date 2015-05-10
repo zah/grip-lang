@@ -397,7 +397,7 @@ proc esc(c: char, reserved = {'\0'..'\255'}): string =
   elif c in reserved: result = '\\' & c
   else: result = $c
   
-proc singleQuoteEsc(c: Char): string = return "'" & esc(c, {'\''}) & "'"
+proc singleQuoteEsc(c: char): string = return "'" & esc(c, {'\''}) & "'"
 
 proc singleQuoteEsc(str: string): string = 
   result = "'"
@@ -421,11 +421,11 @@ proc charSetEscAux(cc: set[char]): string =
       c1 = c2
     inc(c1)
   
-proc CharSetEsc(cc: set[char]): string =
+proc charSetEsc(cc: set[char]): string =
   if card(cc) >= 128+64: 
-    result = "[^" & CharSetEscAux({'\1'..'\xFF'} - cc) & ']'
+    result = "[^" & charSetEscAux({'\1'..'\xFF'} - cc) & ']'
   else: 
-    result = '[' & CharSetEscAux(cc) & ']'
+    result = '[' & charSetEscAux(cc) & ']'
   
 proc toStrAux(r: TPeg, res: var string) = 
   case r.kind
@@ -522,18 +522,18 @@ proc `$` *(r: TPeg): string {.rtl, extern: "npegsToString".} =
 
 type
   TCaptures* {.final.} = object ## contains the captured substrings.
-    matches: array[0..maxSubpatterns-1, tuple[first, last: int]]
+    matches: array[0..MaxSubpatterns-1, tuple[first, last: int]]
     ml: int
     origStart: int
 
 proc bounds*(c: TCaptures, 
-             i: range[0..maxSubpatterns-1]): tuple[first, last: int] = 
+             i: range[0..MaxSubpatterns-1]): tuple[first, last: int] = 
   ## returns the bounds ``[first..last]`` of the `i`'th capture.
   result = c.matches[i]
 
 when not useUnicode:
   type
-    TRune = char
+    Rune = char
   template fastRuneAt(s, i, ch: expr) =
     ch = s[i]
     inc(i)
@@ -563,7 +563,7 @@ proc rawMatch*(s: string, p: TPeg, start: int, c: var TCaptures): int {.
       result = -1
   of pkLetter: 
     if s[start] != '\0':
-      var a: TRune
+      var a: Rune
       result = start
       fastRuneAt(s, result, a)
       if isAlpha(a): dec(result, start)
@@ -572,7 +572,7 @@ proc rawMatch*(s: string, p: TPeg, start: int, c: var TCaptures): int {.
       result = -1
   of pkLower: 
     if s[start] != '\0':
-      var a: TRune
+      var a: Rune
       result = start
       fastRuneAt(s, result, a)
       if isLower(a): dec(result, start)
@@ -581,7 +581,7 @@ proc rawMatch*(s: string, p: TPeg, start: int, c: var TCaptures): int {.
       result = -1
   of pkUpper: 
     if s[start] != '\0':
-      var a: TRune
+      var a: Rune
       result = start
       fastRuneAt(s, result, a)
       if isUpper(a): dec(result, start)
@@ -590,7 +590,7 @@ proc rawMatch*(s: string, p: TPeg, start: int, c: var TCaptures): int {.
       result = -1
   of pkTitle: 
     if s[start] != '\0':
-      var a: TRune
+      var a: Rune
       result = start
       fastRuneAt(s, result, a)
       if isTitle(a): dec(result, start) 
@@ -599,7 +599,7 @@ proc rawMatch*(s: string, p: TPeg, start: int, c: var TCaptures): int {.
       result = -1
   of pkWhitespace: 
     if s[start] != '\0':
-      var a: TRune
+      var a: Rune
       result = start
       fastRuneAt(s, result, a)
       if isWhitespace(a): dec(result, start)
@@ -623,7 +623,7 @@ proc rawMatch*(s: string, p: TPeg, start: int, c: var TCaptures): int {.
   of pkTerminalIgnoreCase:
     var
       i = 0
-      a, b: TRune
+      a, b: Rune
     result = start
     while i < len(p.term):
       fastRuneAt(p.term, i, a)
@@ -635,15 +635,15 @@ proc rawMatch*(s: string, p: TPeg, start: int, c: var TCaptures): int {.
   of pkTerminalIgnoreStyle:
     var
       i = 0
-      a, b: TRune
+      a, b: Rune
     result = start
     while i < len(p.term):
       while true:
         fastRuneAt(p.term, i, a)
-        if a != TRune('_'): break
+        if a != Rune('_'): break
       while true:
         fastRuneAt(s, result, b)
-        if b != TRune('_'): break
+        if b != Rune('_'): break
       if toLower(a) != toLower(b):
         result = -1
         break
@@ -695,7 +695,7 @@ proc rawMatch*(s: string, p: TPeg, start: int, c: var TCaptures): int {.
     while start+result < s.len:
       var x = rawMatch(s, p.sons[0], start+result, c)
       if x >= 0:
-        if idx < maxSubpatterns:
+        if idx < MaxSubpatterns:
           c.matches[idx] = (start, start+result-1)
         #else: silently ignore the capture
         inc(result, x)
@@ -739,7 +739,7 @@ proc rawMatch*(s: string, p: TPeg, start: int, c: var TCaptures): int {.
     inc(c.ml)
     result = rawMatch(s, p.sons[0], start, c)
     if result >= 0:
-      if idx < maxSubpatterns:
+      if idx < MaxSubpatterns:
         c.matches[idx] = (start, start+result-1)
       #else: silently ignore the capture
     else:
@@ -836,7 +836,7 @@ iterator findAll*(s: string, pattern: TPeg, start = 0): string =
   while i < s.len:
     var L = matchLen(s, pattern, matches, i)
     if L < 0: break
-    for k in 0..maxSubPatterns-1: 
+    for k in 0..MaxSubPatterns-1: 
       if isNil(matches[k]): break
       yield matches[k]
     inc(i, L)
@@ -865,8 +865,8 @@ template `=~`*(s: string, pattern: TPeg): expr =
   ##   else:
   ##     echo("syntax error")
   ##  
-  when not definedInScope(matches):
-    var matches {.inject.}: array[0..maxSubpatterns-1, string]
+  when not declaredInScope(matches):
+    var matches {.inject.}: array[0..MaxSubpatterns-1, string]
   match(s, pattern, matches)
 
 # ------------------------- more string handling ------------------------------
@@ -907,7 +907,7 @@ proc replacef*(s: string, sub: TPeg, by: string): string {.
   ##   "var1<-keykey; val2<-key2key2"
   result = ""
   var i = 0
-  var caps: array[0..maxSubpatterns-1, string]
+  var caps: array[0..MaxSubpatterns-1, string]
   while i < s.len:
     var x = matchLen(s, sub, caps, i)
     if x <= 0:
@@ -924,7 +924,7 @@ proc replace*(s: string, sub: TPeg, by = ""): string {.
   ## in `by`.
   result = ""
   var i = 0
-  var caps: array[0..maxSubpatterns-1, string]
+  var caps: array[0..MaxSubpatterns-1, string]
   while i < s.len:
     var x = matchLen(s, sub, caps, i)
     if x <= 0:
@@ -942,7 +942,7 @@ proc parallelReplace*(s: string, subs: varargs[
   ## applied in parallel.
   result = ""
   var i = 0
-  var caps: array[0..maxSubpatterns-1, string]
+  var caps: array[0..MaxSubpatterns-1, string]
   while i < s.len:
     block searchSubs:
       for j in 0..high(subs):
@@ -964,7 +964,7 @@ proc transformFile*(infile, outfile: string,
   ## error occurs. This is supposed to be used for quick scripting.
   var x = readFile(infile)
   if not isNil(x):
-    var f: TFile
+    var f: File
     if open(f, outfile, fmWrite):
       write(f, x.parallelReplace(subs))
       close(f)
@@ -1055,7 +1055,7 @@ type
   TPegLexer {.inheritable.} = object          ## the lexer object.
     bufpos: int               ## the current position within the buffer
     buf: cstring              ## the buffer itself
-    LineNumber: int           ## the current line number
+    lineNumber: int           ## the current line number
     lineStart: int            ## index of last line start in buffer
     colOffset: int            ## column to add
     filename: string
@@ -1118,38 +1118,38 @@ proc getEscapedChar(c: var TPegLexer, tok: var TToken) =
   case c.buf[c.bufpos]
   of 'r', 'R', 'c', 'C': 
     add(tok.literal, '\c')
-    Inc(c.bufpos)
+    inc(c.bufpos)
   of 'l', 'L': 
     add(tok.literal, '\L')
-    Inc(c.bufpos)
+    inc(c.bufpos)
   of 'f', 'F': 
     add(tok.literal, '\f')
     inc(c.bufpos)
   of 'e', 'E': 
     add(tok.literal, '\e')
-    Inc(c.bufpos)
+    inc(c.bufpos)
   of 'a', 'A': 
     add(tok.literal, '\a')
-    Inc(c.bufpos)
+    inc(c.bufpos)
   of 'b', 'B': 
     add(tok.literal, '\b')
-    Inc(c.bufpos)
+    inc(c.bufpos)
   of 'v', 'V': 
     add(tok.literal, '\v')
-    Inc(c.bufpos)
+    inc(c.bufpos)
   of 't', 'T': 
     add(tok.literal, '\t')
-    Inc(c.bufpos)
+    inc(c.bufpos)
   of 'x', 'X': 
     inc(c.bufpos)
     var xi = 0
     handleHexChar(c, xi)
     handleHexChar(c, xi)
     if xi == 0: tok.kind = tkInvalid
-    else: add(tok.literal, Chr(xi))
+    else: add(tok.literal, chr(xi))
   of '0'..'9': 
     var val = ord(c.buf[c.bufpos]) - ord('0')
-    Inc(c.bufpos)
+    inc(c.bufpos)
     var i = 1
     while (i <= 3) and (c.buf[c.bufpos] in {'0'..'9'}): 
       val = val * 10 + ord(c.buf[c.bufpos]) - ord('0')
@@ -1159,11 +1159,11 @@ proc getEscapedChar(c: var TPegLexer, tok: var TToken) =
     else: tok.kind = tkInvalid
   of '\0'..'\31':
     tok.kind = tkInvalid
-  elif c.buf[c.bufpos] in strutils.letters:
+  elif c.buf[c.bufpos] in strutils.Letters:
     tok.kind = tkInvalid
   else:
     add(tok.literal, c.buf[c.bufpos])
-    Inc(c.bufpos)
+    inc(c.bufpos)
   
 proc skip(c: var TPegLexer) = 
   var pos = c.bufpos
@@ -1171,7 +1171,7 @@ proc skip(c: var TPegLexer) =
   while true: 
     case buf[pos]
     of ' ', '\t': 
-      Inc(pos)
+      inc(pos)
     of '#':
       while not (buf[pos] in {'\c', '\L', '\0'}): inc(pos)
     of '\c':
@@ -1203,7 +1203,7 @@ proc getString(c: var TPegLexer, tok: var TToken) =
       break      
     else:
       add(tok.literal, buf[pos])
-      Inc(pos)
+      inc(pos)
   c.bufpos = pos
   
 proc getDollar(c: var TPegLexer, tok: var TToken) = 
@@ -1244,7 +1244,7 @@ proc getCharSet(c: var TPegLexer, tok: var TToken) =
       break
     else: 
       ch = buf[pos]
-      Inc(pos)
+      inc(pos)
     incl(tok.charset, ch)
     if buf[pos] == '-':
       if buf[pos+1] == ']':
@@ -1264,7 +1264,7 @@ proc getCharSet(c: var TPegLexer, tok: var TToken) =
           break
         else: 
           ch2 = buf[pos]
-          Inc(pos)
+          inc(pos)
         for i in ord(ch)+1 .. ord(ch2):
           incl(tok.charset, chr(i))
   c.bufpos = pos
@@ -1275,7 +1275,7 @@ proc getSymbol(c: var TPegLexer, tok: var TToken) =
   var buf = c.buf
   while true: 
     add(tok.literal, buf[pos])
-    Inc(pos)
+    inc(pos)
     if buf[pos] notin strutils.IdentChars: break
   c.bufpos = pos
   tok.kind = tkIdentifier
@@ -1312,11 +1312,11 @@ proc getTok(c: var TPegLexer, tok: var TToken) =
     getCharset(c, tok)
   of '(':
     tok.kind = tkParLe
-    Inc(c.bufpos)
+    inc(c.bufpos)
     add(tok.literal, '(')
   of ')':
     tok.kind = tkParRi
-    Inc(c.bufpos)
+    inc(c.bufpos)
     add(tok.literal, ')')
   of '.': 
     tok.kind = tkAny
@@ -1404,8 +1404,8 @@ proc arrowIsNextTok(c: TPegLexer): bool =
 # ----------------------------- parser ----------------------------------------
     
 type
-  EInvalidPeg* = object of EInvalidValue ## raised if an invalid
-                                         ## PEG has been detected
+  EInvalidPeg* = object of ValueError ## raised if an invalid
+                                      ## PEG has been detected
   TPegParser = object of TPegLexer ## the PEG parser object
     tok: TToken
     nonterms: seq[PNonTerminal]
