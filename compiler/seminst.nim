@@ -64,6 +64,11 @@ iterator instantiateGenericParamList(c: PContext, n: PNode, pt: TIdTable): PSym 
     var s = newSym(symKind, q.name, getCurrOwner(c), q.info)
     s.flags = s.flags + {sfUsed, sfFromGeneric}
     var t = PType(idTableGet(pt, q.typ))
+    if false and mdbg:
+      echo "PARAM"
+      debug q.typ
+      echo "RESULT"
+      debug t
     if t == nil:
       if tfRetType in q.typ.flags:
         # keep the generic type and allow the return type to be bound
@@ -161,7 +166,9 @@ proc sideEffectsCheck(c: PContext, s: PSym) =
         {sfNoSideEffect, sfSideEffect}:
       localError(s.info, errXhasSideEffects, s.name.s)
 
-proc instGenericContainer(c: PContext, info: TLineInfo, header: PType,
+proc instGenericContainer(c: PContext,
+                          info: TLineInfo,
+                          header: PType,
                           allowMetaTypes = false): PType =
   var cl: TReplTypeVars
   initIdTable(cl.symMap)
@@ -173,7 +180,7 @@ proc instGenericContainer(c: PContext, info: TLineInfo, header: PType,
   result = replaceTypeVarsT(cl, header)
 
 proc instantiateProcType(c: PContext, pt: TIdTable,
-                          prc: PSym, info: TLineInfo) =
+                         prc: PSym, info: TLineInfo) =
   # XXX: Instantiates a generic proc signature, while at the same
   # time adding the instantiated proc params into the current scope.
   # This is necessary, because the instantiation process may refer to
@@ -200,7 +207,9 @@ proc instantiateProcType(c: PContext, pt: TIdTable,
     if i > 1:
       resetIdTable(cl.symMap)
       resetIdTable(cl.localCache)
+    
     result.sons[i] = replaceTypeVarsT(cl, result.sons[i])
+    
     propagateToOwner(result, result.sons[i])
     internalAssert originalParams[i].kind == nkSym
     when true:
@@ -275,6 +284,9 @@ proc generateInstance(c: PContext, fn: PSym, pt: TIdTable,
     inc i
   rawPushProcCon(c, result)
   instantiateProcType(c, pt, result, info)
+  if false and mdbg:
+    echo "PROC TYPE"
+    debug result.typ
   for j in 1 .. result.typ.len-1:
     entry.concreteTypes[i] = result.typ.sons[j]
     inc i
@@ -296,7 +308,13 @@ proc generateInstance(c: PContext, fn: PSym, pt: TIdTable,
       pragma(c, result, n.sons[pragmasPos], allRoutinePragmas)
     if isNil(n.sons[bodyPos]):
       n.sons[bodyPos] = copyTree(fn.getBody)
+    if false and mdbg:
+      echo "BEFORE BODY"
+      debug result.typ
     instantiateBody(c, n, fn.typ.n, result, fn)
+    if false and mdbg:
+      echo "AFTER BODY"
+      debug result.typ
     sideEffectsCheck(c, result)
     paramsTypeCheck(c, result.typ)
   else:

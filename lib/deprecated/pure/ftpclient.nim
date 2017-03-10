@@ -116,7 +116,8 @@ type
 
 const multiLineLimit = 10000
 
-proc ftpClient*(address: string, port = Port(21),
+proc ftpClient*(address: string,
+                port = Port(21),
                 user, pass = ""): FtpClient =
   ## Create a ``FtpClient`` object.
   new(result)

@@ -16,7 +16,8 @@ type
 
 proc some[T](v: T): Option[T] = Option[T](valid: true, data: v)
 proc none[T](v: T): Option[T] = Option[T](valid: false)
-proc none(T: typedesc): Option[T] = Option[T](valid: false)
+proc none(T: typedesc): Option[T] =
+  Option[T](valid: false)
 
 proc map[T,U](o: Option[T], f: T -> U): Option[U] =
   case o.valid

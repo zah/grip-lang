@@ -35,7 +35,7 @@ var
 
 # example from the manual:
 type
-  Matrix[M,N: static[int]; T] = array[0..(M*N - 1), T]
+  Matrix[M,N: static[int]; T] = distinct array[0..(M*N - 1), T]
     # Note how `Number` is just a type constraint here, while
     # `static[int]` requires us to supply a compile-time int value
 

@@ -9,7 +9,7 @@
 
 # This module does the instantiation of generic types.
 
-import ast, astalgo, msgs, types, magicsys, semdata, renderer
+import ast, astalgo, msgs, types, magicsys, semdata, renderer, options
 
 const
   tfInstClearedFlags = {tfHasMeta}
@@ -50,8 +50,10 @@ proc searchInstTypes*(key: PType): PType =
       # types such as Channel[empty]. Why?
       # See the notes for PActor in handleGenericInvocation
       return
+    if not sameFlags(inst, key): continue
+
     block matchType:
-      for j in 1 .. high(key.sons):
+      for j in 1 .. <high(inst.sons):
         # XXX sameType is not really correct for nested generics?
         if not compareTypes(inst.sons[j], key.sons[j],
                             flags = {ExactGenericParams}):
@@ -67,7 +69,6 @@ proc cacheTypeInst*(inst: PType) =
   if t.kind in {tyStatic, tyGenericParam} + tyTypeClasses:
     return
   gt.sym.typeInstCache.safeAdd(inst)
-
 
 type
   TReplTypeVars* {.final.} = object
@@ -92,8 +93,6 @@ template checkMetaInvariants(cl: TReplTypeVars, t: PType) =
   when false:
     if t != nil and tfHasMeta in t.flags and
        cl.allowMetaTypes == false:
-      echo "UNEXPECTED META ", t.id, " ", instantiationInfo(-1)
-      debug t
       writeStackTrace()
 
 proc replaceTypeVarsT*(cl: var TReplTypeVars, t: PType): PType =
@@ -449,14 +448,52 @@ proc replaceTypeVarsTAux(cl: var TReplTypeVars, t: PType): PType =
 
   of tyGenericInst:
     bailout()
-    result = instCopyType(cl, t)
+    
+    # `t` may be a proc param type with some specific concrete type already
+    # associated from sigmatch. we use this as a quicker exit path here:
+    result = PType(idTableGet(cl.typeMap, t)) # lookupTypeVar(cl, t)
+    if result != nil:
+      # If the formal parameter has a NotNil flag, we cannot reuse the bound
+      # paramater type directly, we must create a copy which may end up in the
+      # instantiation cache
+      if tfNotNil in t.lastSon.flags:
+        result = instCopyType(cl, result)
+        result.flags.incl tfNotNil
+      else:
+        return
+    else:
+      result = instCopyType(cl, t)
+
     idTablePut(cl.localCache, t, result)
+    
+    let oldSkipTypedesc = cl.skipTypedesc
+    cl.skipTypedesc = true
     for i in 1 .. <result.sonsLen:
       result.sons[i] = replaceTypeVarsT(cl, result.sons[i])
+    cl.skipTypedesc = oldSkipTypedesc
+ 
+    result.lastSon.typeInst = result
     propagateToOwner(result, result.lastSon)
-
+    
+    # The newly instantiated type may be already cached
+    # we don't want to create a duplicate
+    let prev = searchInstTypes(result)
+    if false and mdbg:
+      echo "SEARCH CACHE"
+      debug t
+      echo "INSTANCE"
+      debug result
+      echo "CACHE"
+      debug prev
+    if prev != nil:
+      return prev
+    else:
+      if not cl.allowMetaTypes:
+        cacheTypeInst(result)
   else:
-    if containsGenericType(t):
+    # the tfHasMeta check is much quicker, but we also keep
+    # the old exhausive search as a conservative safety net
+    if tfHasMeta in t.flags or containsGenericType(t):
       #if not cl.allowMetaTypes:
       bailout()
       result = instCopyType(cl, t)

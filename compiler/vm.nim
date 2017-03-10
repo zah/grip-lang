@@ -1608,6 +1608,12 @@ proc setupMacroParam(x: PNode, typ: PType): TFullReg =
 
 var evalMacroCounter: int
 
+iterator genericParamsInMacroCall*(macroSym: PSym, call: PNode): (PSym, PNode) =
+  let gp = macroSym.ast[genericParamsPos]
+  for i in 0 .. <gp.len:
+    let idx = macroSym.typ.len + i
+    yield (gp[i].sym, call.sons[idx])
+
 proc evalMacroCall*(module: PSym; cache: IdentCache, n, nOrig: PNode,
                     sym: PSym): PNode =
   # XXX globalError() is ugly here, but I don't know a better solution for now

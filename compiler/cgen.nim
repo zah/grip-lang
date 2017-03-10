@@ -800,6 +800,9 @@ proc requestConstImpl(p: BProc, sym: PSym) =
   var q = findPendingModule(m, sym)
   if q != nil and not containsOrIncl(q.declaredThings, sym.id):
     assert q.initProc.module == q
+    if false:
+      echo "CONST VAL"
+      debug sym.ast
     addf(q.s[cfsData], "NIM_CONST $1 $2 = $3;$n",
         [getTypeDesc(q, sym.typ), sym.loc.r, genConstExpr(q.initProc, sym.ast)])
   # declare header:

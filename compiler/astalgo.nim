@@ -74,6 +74,8 @@ template mdbg*: bool {.dirty.} =
     m.c.module.fileIdx == gProjectMainIdx
   elif compiles(cl.c.module):
     cl.c.module.fileIdx == gProjectMainIdx
+  elif compiles(m.module.fileIdx):
+    m.module.fileIdx == gProjectMainIdx
   elif compiles(p):
     when compiles(p.lex):
       p.lex.fileIdx == gProjectMainIdx
@@ -82,7 +84,7 @@ template mdbg*: bool {.dirty.} =
   elif compiles(L.fileIdx):
     L.fileIdx == gProjectMainIdx
   else:
-    false
+    error()
 
 # --------------------------- ident tables ----------------------------------
 proc idTableGet*(t: TIdTable, key: PIdObj): RootRef

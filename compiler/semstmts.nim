@@ -485,6 +485,10 @@ proc semVarOrLet(c: PContext, n: PNode, symkind: TSymKind): PNode =
     var def: PNode = ast.emptyNode
     if a.sons[length-1].kind != nkEmpty:
       def = semExprWithType(c, a.sons[length-1], {efAllowDestructor})
+      if false and mdbg:
+        echo "VAR OR LET"
+        debug def
+        debug def.typ
       if def.typ.kind == tyTypeDesc and c.p.owner.kind != skMacro:
         # prevent the all too common 'var x = int' bug:
         localError(def.info, "'typedesc' metatype is not valid here; typed '=' instead of ':'?")
@@ -579,6 +583,10 @@ proc semConst(c: PContext, n: PNode): PNode =
     if a.sons[1].kind != nkEmpty: typ = semTypeNode(c, a.sons[1], nil)
 
     var def = semConstExpr(c, a.sons[2])
+    if false and mdbg:
+      echo "CONST TYPE"
+      debug def.typ
+
     if def == nil:
       localError(a.sons[2].info, errConstExprExpected)
       continue
@@ -1142,10 +1150,10 @@ proc semOverride(c: PContext, s: PSym, n: PNode) =
         sameType(s.typ.sons[1], s.typ.sons[0]):
       # Note: we store the deepCopy in the base of the pointer to mitigate
       # the problem that pointers are structural types:
-      var t = s.typ.sons[1].skipTypes(abstractInst).lastSon.skipTypes(abstractInst)
+      var t = s.typ.sons[1].skipTypes(abstractInst).lastSon
       while true:
         if t.kind == tyGenericBody: t = t.lastSon
-        elif t.kind == tyGenericInvocation: t = t.sons[0]
+        elif t.kind in {tyGenericInvocation, tyGenericInst}: t = t.sons[0]
         else: break
       if t.kind in {tyObject, tyDistinct, tyEnum}:
         if t.deepCopy.isNil: t.deepCopy = s
@@ -1367,7 +1375,10 @@ proc semProcAux(c: PContext, n: PNode, kind: TSymKind,
     else:
       pushProcCon(c, s)
       if n.sons[genericParamsPos].kind == nkEmpty or usePseudoGenerics:
-        if not usePseudoGenerics: paramsTypeCheck(c, s.typ)
+        if not usePseudoGenerics:
+          # echo "WTF?"
+          # debug s.typ
+          paramsTypeCheck(c, s.typ)
 
         c.p.wasForwarded = proto != nil
         maybeAddResult(c, s, n)

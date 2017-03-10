@@ -796,7 +796,7 @@ proc liftParamType(c: PContext, procKind: TSymKind, genericParams: PNode,
     # proc(a: expr{string}, b: expr{nkLambda})
     # overload on compile time values and AST trees
     if paramType.n != nil: return # this is a concrete type
-    if tfUnresolved in paramType.flags: return # already lifted
+    if tfUnresolved in paramType.flags: return paramType # already lifted
     let base = paramType.base.maybeLift
     if base.isMetaType and procKind == skMacro:
       localError(info, errMacroBodyDependsOnGenericTypes, paramName)
@@ -855,10 +855,8 @@ proc liftParamType(c: PContext, procKind: TSymKind, genericParams: PNode,
       return addImplicitGeneric(result)
 
     let x = instGenericContainer(c, paramType.sym.info, result,
-                                  allowMetaTypes = true)
+                                 allowMetaTypes = true)
     result = newTypeWithSons(c, tyCompositeTypeClass, @[paramType, x])
-    #result = newTypeS(tyCompositeTypeClass, c)
-    #for i in 0..<x.len: result.rawAddSon(x.sons[i])
     result = addImplicitGeneric(result)
 
   of tyGenericInst:
@@ -872,21 +870,33 @@ proc liftParamType(c: PContext, procKind: TSymKind, genericParams: PNode,
       if lifted != nil:
         paramType.sons[i] = lifted
         result = paramType
-        result.lastSon.shouldHaveMeta
-
-    let liftBody = liftingWalk(paramType.lastSon, true)
-    if liftBody != nil:
-      result = liftBody
-      result.shouldHaveMeta
+ 
+    if paramType.lastSon.kind != tyDistinct:
+      let liftedBody = liftingWalk(paramType.lastSon, true)
+      if liftedBody != nil:
+        result = liftedBody
+        result.shouldHaveMeta
 
   of tyGenericInvocation:
+    var hasGenericParams = false
     for i in 1 .. <paramType.len:
+      if false and mdbg:
+        echo "ABOUT TO LIFT"
+        debug paramType.sons[i]
       let lifted = liftingWalk(paramType.sons[i])
-      if lifted != nil: paramType.sons[i] = lifted
-    when false:
-      let expanded = instGenericContainer(c, info, paramType,
-                                          allowMetaTypes = true)
-      result = liftingWalk(expanded, true)
+      if lifted != nil:
+        hasGenericParams = true
+        paramType.sons[i] = lifted
+    
+    if false and mdbg:
+      echo "LIFTING INV ", hasGenericParams, " ", paramType.flags
+      debug paramType
+    let expanded = instGenericContainer(c, info, paramType,
+                                        allowMetaTypes = hasGenericParams)
+    result = liftingWalk(expanded, true)
+    if false and mdbg:
+      echo "AFTER LIFTING ", result.flags
+      debug result
 
   of tyUserTypeClass, tyBuiltInTypeClass, tyAnd, tyOr, tyNot:
     result = addImplicitGeneric(copyType(paramType, getCurrOwner(c), true))
@@ -897,6 +907,12 @@ proc liftParamType(c: PContext, procKind: TSymKind, genericParams: PNode,
     if tfWildcard in paramType.flags:
       paramType.flags.excl tfWildcard
       paramType.sym.kind = skType
+    result = paramType
+
+  of tyFromExpr:
+    # XXX: For extra safety, we can check that this param originates
+    # from the current function and it has an assigned sigmatch position
+    return paramType
 
   else: discard
 
@@ -908,6 +924,9 @@ proc semParamType(c: PContext, n: PNode, constraint: var PNode): PType =
     constraint = semNodeKindConstraints(n)
   else:
     result = semTypeNode(c, n, nil)
+    if false and mdbg:
+      echo "PARSED PARAM ", result.flags
+      debug result
 
 proc newProcType(c: PContext; info: TLineInfo; prev: PType = nil): PType =
   result = newOrPrevType(tyProc, prev, c)

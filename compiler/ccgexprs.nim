@@ -1152,6 +1152,9 @@ proc handleConstExpr(p: BProc, n: PNode, d: var TLoc): bool =
     if id == p.module.labels:
       # expression not found in the cache:
       inc(p.module.labels)
+      if false:
+        echo "HANDLE CONST"
+        debug n
       addf(p.module.s[cfsData], "NIM_CONST $1 $2 = $3;$n",
            [getTypeDesc(p.module, t), d.r, genConstExpr(p, n)])
     result = true

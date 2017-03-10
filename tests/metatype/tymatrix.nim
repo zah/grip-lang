@@ -4,7 +4,7 @@ template reject(e: expr) =
   static: assert(not compiles(e))
 
 type
-  TMatrix[T; M, N: static[int]] = array[M*N, T]
+  TMatrix[T; M, N: static[int]] = distinct array[M*N, T]
 
 proc `*`[T; R, N, C](a: TMatrix[T, R, N], b: TMatrix[T, N, C]): TMatrix[T, R, C] =
   discard

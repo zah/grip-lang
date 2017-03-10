@@ -522,9 +522,8 @@ proc getRecordDesc(m: BModule, typ: PType, name: Rope,
 
   result = ropecg(m, CC[cCompiler].structStmtFmt,
     [structOrUnion(typ), name, attribute])
-
+  
   if typ.kind == tyObject:
-
     if typ.sons[0] == nil:
       if (typ.sym != nil and sfPure in typ.sym.flags) or tfFinal in typ.flags:
         appcg(m, result, " {$n", [])
@@ -790,6 +789,8 @@ proc getTypeDescAux(m: BModule, origTyp: PType, check: var IntSet): Rope =
   of tyGenericInst, tyDistinct, tyOrdinal, tyTypeDesc, tyAlias:
     result = getTypeDescAux(m, lastSon(t), check)
   else:
+    debug t
+    debug t.sym
     internalError("getTypeDescAux(" & $t.kind & ')')
     result = nil
   # fixes bug #145:

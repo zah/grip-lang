@@ -1,6 +1,8 @@
 discard """
-  output: '''true'''
+  output: '''true BaseObj[int]'''
 """
+
+import typetraits
 
 # bug #4673
 type
@@ -8,6 +10,7 @@ type
   SomeObj = ref object of BaseObj[int]
 
 proc doSomething[T](o: BaseObj[T]) =
-  echo "true"
+  echo "true ", o.type.name
+
 var o = new(SomeObj)
 o.doSomething() # Error: cannot instantiate: 'T'

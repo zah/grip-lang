@@ -11,9 +11,5 @@ const
 
 # protect against overly smart compiler:
 var x = "this"
+echo foo[x]
 
-echo foo[x]
-x = "ah"
-echo foo[x]
-x = "possible."
-echo foo[x]

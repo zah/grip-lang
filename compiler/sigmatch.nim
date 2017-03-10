@@ -650,6 +650,7 @@ proc tryResolvingStaticExpr(c: var TCandidate, n: PNode): PNode =
   # Here, N-1 will be initially nkStaticExpr that can be evaluated only after
   # N is bound to a concrete value during the matching of the first param.
   # This proc is used to evaluate such static expressions.
+  
   let instantiated = replaceTypesInBody(c.c, c.bindings, n, nil)
   result = c.c.semExpr(c.c, instantiated)
 
@@ -674,6 +675,7 @@ proc typeRel(c: var TCandidate, f, aOrig: PType, doBind = true): TTypeRelation =
   #
   # seq[seq[any]] is a strict subset of seq[any] and hence more specific.
 
+  var m = c
   result = isNone
   assert(f != nil)
 
@@ -980,8 +982,37 @@ proc typeRel(c: var TCandidate, f, aOrig: PType, doBind = true): TTypeRelation =
   of tyEmpty, tyVoid:
     if a.kind == f.kind: result = isEqual
 
-  of tyGenericInst, tyAlias:
+  of tyAlias:
     result = typeRel(c, lastSon(f), a)
+
+  of tyGenericInst:
+    var prev = PType(idTableGet(c.bindings, f))
+    var f = if prev == nil: f else: prev
+
+    let roota = a.skipGenericAlias
+    let rootf = f.skipGenericAlias
+    
+    var m = c
+    if false and mdbg:
+      echo "SEM INST"
+      debug roota
+
+    if a.kind == tyGenericInst:
+      if roota.base == rootf.base:
+        for i in 1 .. rootf.sonsLen-2:
+          let ff = rootf.sons[i]
+          let aa = roota.sons[i]
+          result = typeRel(c, ff, aa)
+          if result notin {isEqual, isGeneric}: return isNone
+          # if ff.kind == tyRange and result != isEqual: return isNone
+
+        if prev == nil: put(c, f, a)
+        result = isGeneric
+      else:
+        result = isNone
+    else:
+      result = typeRel(c, lastSon(f), a)
+      if result != isNone: put(c, f, a)
 
   of tyGenericBody:
     considerPreviousT:
@@ -1044,6 +1075,7 @@ proc typeRel(c: var TCandidate, f, aOrig: PType, doBind = true): TTypeRelation =
         # bug #4863: We still need to bind generic alias crap, so
         # we cannot return immediately:
         result = if depth == 0: isGeneric else: isSubtype
+  
   of tyAnd:
     considerPreviousT:
       result = isEqual
@@ -1344,7 +1376,7 @@ proc paramTypesMatchAux(m: var TCandidate, f, argType: PType,
     arg = argSemantized
     argType = argType
     c = m.c
-
+  
   if tfHasStatic in fMaybeStatic.flags:
     # XXX: When implicit statics are the default
     # this will be done earlier - we just have to

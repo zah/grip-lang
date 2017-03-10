@@ -597,6 +597,17 @@ proc newSymNodeTypeDesc*(s: PSym; info: TLineInfo): PNode =
   result.typ = newType(tyTypeDesc, s.owner)
   result.typ.addSonSkipIntLit(s.typ)
 
+proc expectConcreteType(n: PNode, magic: string): PType =
+  result = n.typ.skipTypes(abstractVar)
+  if result.isMetaType:
+    if tfRetType in result.flags:
+      localError(n.info,
+        "the return type of the proc '$1' is not yet inferred. " &
+         "'$2' expects a concrete type.",
+         [result.typeToString, magic])
+    else:
+      localError(n.info, errTIsNotAConcreteType, result.typeToString)
+
 proc getConstExpr(m: PSym, n: PNode): PNode =
   result = nil
   case n.kind
@@ -655,7 +666,7 @@ proc getConstExpr(m: PSym, n: PNode): PNode =
         return
       of mSizeOf:
         var a = n.sons[1]
-        if computeSize(a.typ) < 0:
+        if computeSize(expectConcreteType(a, "sizeof")) < 0:
           localError(a.info, errCannotEvalXBecauseIncompletelyDefined,
                      "sizeof")
           result = nil
@@ -667,11 +678,12 @@ proc getConstExpr(m: PSym, n: PNode): PNode =
           result = nil
           # XXX: size computation for complex types is still wrong
       of mLow:
-        result = newIntNodeT(firstOrd(n.sons[1].typ), n)
+        result = newIntNodeT(firstOrd(expectConcreteType(n.sons[1], "low")), n)
       of mHigh:
-        if skipTypes(n.sons[1].typ, abstractVar).kind notin
+        let typ = expectConcreteType(n.sons[1], "high")
+        if typ.kind notin
             {tySequence, tyString, tyCString, tyOpenArray, tyVarargs}:
-          result = newIntNodeT(lastOrd(skipTypes(n[1].typ, abstractVar)), n)
+          result = newIntNodeT(typ.lastOrd, n)
         else:
           var a = getArrayConstr(m, n.sons[1])
           if a.kind == nkBracket:
