@@ -108,7 +108,18 @@ proc uninstantiate(t: PType): PType =
     else: t
 
 proc buildVTableType(c: PContext, con: PType): PType =
-  result = errorType(c)
+  # try getting the value from cache
+  var
+    wildcardType = errorType(c)
+    diagnostics: seq[string] = @[]
+    boundTypes: TIdTable
+  initIdTable(boundTypes)
+  
+  let match = matchConcept(c, con, wildcardType, boundTypes, diagnostics)
+  if match == nil:
+    for d in diagnostics:
+      echo d
+      return errorType(c)
 
 proc evalTypeTrait(c: PContext, traitCall: PNode, operand: PType): PNode =
   var owner = getCurrOwner(c)

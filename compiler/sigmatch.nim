@@ -121,6 +121,9 @@ proc initCandidate*(ctx: PContext, c: var TCandidate, callee: PType) =
 proc put(c: var TCandidate, key, val: PType) {.inline.} =
   idTablePut(c.bindings, key, val.skipIntLit)
 
+proc put(bindings: var TIdTable, key, val: PType) {.inline.} =
+  idTablePut(bindings, key, val.skipIntLit)
+
 proc initCandidate*(ctx: PContext, c: var TCandidate, callee: PSym,
                     binding: PNode, calleeScope = -1, diagnostics = false) =
   initCandidateAux(ctx, c, callee.typ)
@@ -640,9 +643,10 @@ proc typeRangeRel(f, a: PType): TTypeRelation {.noinline.} =
   else:
     result = isNone
 
-proc matchConcept(m: var TCandidate; ff, a: PType): PType =
+proc matchConcept*(c: PContext, ff, a: PType,
+                   boundTypes: var TIdTable,
+                   diagnostics: var seq[string]): PType =
   var
-    c = m.c
     con = ff.skipTypes({tyUserTypeClassInst})
     body = con.n[3]
     matchedConceptContext: TMatchedConcept
@@ -673,7 +677,7 @@ proc matchConcept(m: var TCandidate; ff, a: PType): PType =
         typeParamName = ff.base.sons[i-1].sym.name
         typ = ff.sons[i]
         param: PSym
-        alreadyBound = PType(idTableGet(m.bindings, typ))
+        alreadyBound = PType(idTableGet(boundTypes, typ))
 
       if alreadyBound != nil: typ = alreadyBound
 
@@ -711,29 +715,29 @@ proc matchConcept(m: var TCandidate; ff, a: PType): PType =
 
   var
     oldWriteHook: type(writelnHook)
-    diagnostics: seq[string]
+    localDiagnostics: seq[string]
     errorPrefix: string
     flags: TExprFlags = {}
-    collectDiagnostics = m.diagnostics != nil or
+    collectDiagnostics = diagnostics != nil or
                          sfExplain in con.sym.flags
 
   if collectDiagnostics:
     oldWriteHook = writelnHook
-    # XXX: we can't write to m.diagnostics directly, because
+    # XXX: we can't write to diagnostics directly, because
     # Nim doesn't support capturing var params in closures
-    diagnostics = @[]
+    localDiagnostics = @[]
     flags = {efExplain}
     writelnHook = proc (s: string) =
       if errorPrefix == nil: errorPrefix = con.sym.name.s & ":"
       let msg = s.replace("Error:", errorPrefix)
       if oldWriteHook != nil: oldWriteHook msg
-      diagnostics.add msg
+      localDiagnostics.add msg
 
   var checkedBody = c.semTryExpr(c, body.copyTree, flags)
 
   if collectDiagnostics:
     writelnHook = oldWriteHook
-    for msg in diagnostics: m.diagnostics.safeAdd msg
+    for msg in localDiagnostics: diagnostics.safeAdd msg
 
   if checkedBody == nil: return nil
 
@@ -741,10 +745,10 @@ proc matchConcept(m: var TCandidate; ff, a: PType): PType =
   # We need to put them in the current sigmatch's binding table in order for them
   # to be resolvable while matching the rest of the parameters
   for p in typeParams:
-    put(m, p[1], p[0].typ)
+    put(boundTypes, p[1], p[0].typ)
 
   if ff.kind == tyUserTypeClassInst:
-    result = generateTypeInstance(c, m.bindings, con.sym.info, ff)
+    result = generateTypeInstance(c, boundTypes, con.sym.info, ff)
   else:
     result = copyType(ff, ff.owner, true)
 
@@ -1574,7 +1578,7 @@ proc typeRelImpl(c: var TCandidate, f, aOrig: PType,
     else:
       considerPreviousT:
         if aOrig == f: return isEqual
-        var matched = matchConcept(c, f, aOrig)
+        var matched = matchConcept(c.c, f, aOrig, c.bindings, c.diagnostics)
         if matched != nil:
           bindConcreteTypeToConcept(matched, a)
           if doBind: put(c, f, matched)
