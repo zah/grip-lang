@@ -30,3 +30,9 @@ extSha512(nil, 0, nil, 0)
 extKeccak256(nil, 0, nil, 0)
 extKeccak512(nil, 0, nil, 0)
 
+proc sha(bits: static[int], input: string): Hash[bits] =
+  `extSha bits`(addr result.data[0], result.data.len, addr input[0], input.len)
+
+var h1 = sha(256, "lorem ipsum")
+var h2 = sha(512, "lorem ipsum")
+

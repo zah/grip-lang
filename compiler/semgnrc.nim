@@ -173,8 +173,24 @@ proc semGenericStmt(c: PContext, n: PNode,
   semIdeForTemplateOrGenericCheck(n, ctx.cursorInBody)
 
   case n.kind
-  of nkIdent, nkAccQuoted:
+  of nkIdent:
     result = lookup(c, n, flags, ctx)
+    if mdbg:
+      echo "RESOLVED"
+      debug result
+      debug result.typ
+
+  of nkAccQuoted:
+    if n.len == 1:
+      result = lookup(c, n, flags, ctx)
+    else:
+      if mdbg:
+        echo "LOOKING UP"
+        debug n
+      for i in 0 ..< n.len:
+        var resolvedSym = lookup(c, n[i], flags, ctx)
+        if resolvedSym != nil:
+          n[i] = resolvedSym
   of nkDotExpr:
     #let luf = if withinMixin notin flags: {checkUndeclared} else: {}
     #var s = qualifiedLookUp(c, n, luf)
@@ -204,11 +220,22 @@ proc semGenericStmt(c: PContext, n: PNode,
     checkMinSonsLen(n, 1)
     let fn = n.sons[0]
     var s = qualifiedLookUp(c, fn, {})
-    if  s == nil and
-        {withinMixin, withinConcept}*flags == {} and
-        fn.kind in {nkIdent, nkAccQuoted} and
-        considerQuotedIdent(fn).id notin ctx.toMixin:
-      errorUndeclaredIdentifier(c, n.info, fn.renderTree)
+    if s == nil:
+      if fn.kind == nkAccQuoted and fn.len > 1:
+        echo "ATTEMPTING "
+        debug fn
+        for i in 0 ..< fn.len:
+          echo "TRYING TO RESOLVE "
+          if fn[i].kind == nkIdent:
+            var s = searchInScopes(c, fn[i].ident).skipAlias(fn[i])
+            if s != nil and s.kind == skParam:
+              fn.sons[i] = newSymNode(s)
+        return
+      else:
+        if {withinMixin, withinConcept}*flags == {} and
+           fn.kind in {nkIdent, nkAccQuoted} and
+           considerQuotedIdent(fn).id notin ctx.toMixin:
+          errorUndeclaredIdentifier(c, n.info, fn.renderTree)
 
     var first = int ord(withinConcept in flags)
     var mixinContext = false

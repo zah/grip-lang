@@ -43,7 +43,14 @@ proc considerQuotedIdent*(n: PNode, origin: PNode = nil): PIdent =
         let x = n.sons[i]
         case x.kind
         of nkIdent: id.add(x.ident.s)
-        of nkSym: id.add(x.sym.name.s)
+        of nkSym:
+          debug x
+          debug x.typ
+          if x.typ.kind == tyStatic:
+            debug x.typ.n
+            id.add(x.typ.n.renderTree)
+          else:
+            id.add(x.sym.name.s)
         of nkLiterals - nkFloatLiterals: id.add(x.renderTree)
         else: handleError(n, origin)
       result = getIdent(id)
@@ -299,6 +306,9 @@ proc qualifiedLookUp*(c: PContext, n: PNode, flags: set[TLookupFlag]): PSym =
   const allExceptModule = {low(TSymKind)..high(TSymKind)}-{skModule,skPackage}
   case n.kind
   of nkIdent, nkAccQuoted:
+    if false and mdbg:
+      echo "LOOKUP "
+      debug n
     var ident = considerQuotedIdent(n)
     if checkModule in flags:
       result = searchInScopes(c, ident).skipAlias(n)
