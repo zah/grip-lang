@@ -27,6 +27,10 @@
 
 ### Compiler changes
 
+- Support for code hot reloading has been implemented for the JavaScript
+  target. To use it, compile your code with `--hotReloading:on` and use a
+  helper library such as LiveReload or BrowserSync.
+
 ### Bugfixes
 
 - The `importcpp` pragma now allows importing the listed fields of generic
