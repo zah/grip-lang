@@ -1073,7 +1073,7 @@ proc isExprStart(p: TParser): bool =
   of tkSymbol, tkAccent, tkOpr, tkNot, tkNil, tkCast, tkIf,
      tkProc, tkFunc, tkIterator, tkBind, tkAddr,
      tkParLe, tkBracketLe, tkCurlyLe, tkIntLit..tkCharLit, tkVar, tkRef, tkPtr,
-     tkTuple, tkObject, tkType, tkWhen, tkCase, tkOut:
+     tkTuple, tkObject, tkType, tkWhen, tkCase, tkOut, tkStatic:
     result = true
   else: result = false
 
@@ -1086,7 +1086,7 @@ proc parseSymbolList(p: var TParser, result: PNode) =
     if p.tok.tokType != tkComma: break
     getTok(p)
     optInd(p, s)
-
+  
 proc parseTypeDescKAux(p: var TParser, kind: TNodeKind,
                        mode: TPrimaryMode): PNode =
   #| distinct = 'distinct' optInd typeDesc
@@ -1094,7 +1094,10 @@ proc parseTypeDescKAux(p: var TParser, kind: TNodeKind,
   getTok(p)
   if p.tok.indent != -1 and p.tok.indent <= p.currInd: return
   optInd(p, result)
-  if not isOperator(p.tok) and isExprStart(p):
+  if p.tok.tokType == tkBracketLe:
+    let bracket = primary(p, mode)
+    addSon(result, bracket[0])
+  elif not isOperator(p.tok) and isExprStart(p):
     addSon(result, primary(p, mode))
   if kind == nkDistinctTy and p.tok.tokType == tkSymbol:
     # XXX document this feature!
@@ -1177,19 +1180,13 @@ proc primary(p: var TParser, mode: TPrimaryMode): PNode =
       result = parseTypeClass(p)
     else:
       parMessage(p, errInvalidToken, p.tok)
-  of tkStatic:
-    let info = parLineInfo(p)
-    getTokNoInd(p)
-    let next = primary(p, pmNormal)
-    if next.kind == nkBracket and next.sonsLen == 1:
-      result = newNode(nkStaticTy, info, @[next.sons[0]])
-    else:
-      result = newNode(nkStaticExpr, info, @[next])
   of tkBind:
     result = newNodeP(nkBind, p)
     getTok(p)
     optInd(p, result)
     addSon(result, primary(p, pmNormal))
+  of tkType: result = parseTypeDescKAux(p, nkTypeOfExpr, mode)
+  of tkStatic: result = parseTypeDescKAux(p, nkStaticTy, mode)
   of tkVar: result = parseTypeDescKAux(p, nkVarTy, mode)
   of tkOut: result = parseTypeDescKAux(p, nkVarTy, mode)
   of tkRef: result = parseTypeDescKAux(p, nkRefTy, mode)
