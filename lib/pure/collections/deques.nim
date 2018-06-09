@@ -38,7 +38,7 @@
 ## Note: For inter thread communication use
 ## a `Channel <channels.html>`_ instead.
 
-import math
+import math, typetraits
 
 type
   Deque*[T] = object
@@ -160,16 +160,18 @@ proc peekLast*[T](deq: Deque[T]): T {.inline.} =
   emptyCheck(deq)
   result = deq.data[(deq.tail - 1) and deq.mask]
 
-template default[T](t: typedesc[T]): T =
-  var v: T
-  v
+template destroy(x: untyped) =
+  when defined(nimNewRuntime) and not supportsCopyMem(type(x)):
+    `=destroy`(x)
+  else:
+    reset(x)
 
 proc popFirst*[T](deq: var Deque[T]): T {.inline, discardable.} =
   ## Remove and returns the first element of the `deq`.
   emptyCheck(deq)
   dec deq.count
   result = deq.data[deq.head]
-  deq.data[deq.head] = default(type(result))
+  destroy(deq.data[deq.head])
   deq.head = (deq.head + 1) and deq.mask
 
 proc popLast*[T](deq: var Deque[T]): T {.inline, discardable.} =
@@ -178,7 +180,41 @@ proc popLast*[T](deq: var Deque[T]): T {.inline, discardable.} =
   dec deq.count
   deq.tail = (deq.tail - 1) and deq.mask
   result = deq.data[deq.tail]
-  deq.data[deq.tail] = default(type(result))
+  destroy(deq.data[deq.tail])
+
+proc clear*[T](deq: var Deque[T]) {.inline.} =
+  ## Resets the deque so that it is empty.
+  for el in mitems(deq): destroy(el)
+  deq.count = 0
+  deq.tail = deq.head
+
+proc shrink*[T](deq: var Deque[T], fromFront = 0, fromEnd = 0) =
+  ## Remove `fromFront` elements from the front of the deque and
+  ## `fromEnd` elements from the back. If the supplied number of
+  ## elements exceeds the total number of elements in the deque,
+  ## the deque will remain empty.
+  ## 
+  ## Any user defined destructors 
+  if fromFront + fromEnd > deq.count:
+    clear(deq)
+    return
+
+
+  let h = deq.head
+  let t = deq.tail
+  dec deq.count, fromFront + fromEnd
+  deq.head = (deq.head + fromFront) and deq.mask
+  deq.tail = (deq.tail - fromEnd) and deq.mask
+  
+  for i in 0 ..< fromFront:
+    destroy(deq.data[deq.head])
+    deq.head = (deq.head + 1) and deq.mask
+
+  for i in 0 ..< fromEnd:
+    destroy(deq.data[deq.tail])
+    deq.tail = (deq.tail - 1) and deq.mask
+
+  dec deq.count, fromFront + fromEnd
 
 proc `$`*[T](deq: Deque[T]): string =
   ## Turn a deque into its string representation.
