@@ -191,7 +191,7 @@ proc semConv(c: PContext, n: PNode): PNode =
 
   var targetType = semTypeNode(c, n.sons[0], nil)
   if targetType.kind == tyTypeDesc:
-    internalAssert targetType.len > 0
+    internalAssert c.config, targetType.len > 0
     if targetType.base.kind == tyNone:
       return semTypeOf(c, n[1])
     else:
